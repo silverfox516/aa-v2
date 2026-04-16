@@ -1,0 +1,7 @@
+// aa-v2 top-level build definition
+// F.2: Android.bp (Soong) for AOSP tree integration
+
+subdirs = [
+    "core",
+    "protobuf",
+]

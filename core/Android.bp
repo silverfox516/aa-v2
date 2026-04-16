@@ -1,0 +1,62 @@
+// aa-v2 core library — platform-free C++17
+// Hexagonal architecture: ports (interfaces) + core logic
+// No Android-specific includes allowed in this module.
+
+cc_defaults {
+    name: "aauto_core_defaults",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Wpedantic",
+        "-Werror",
+        "-DASIO_STANDALONE",
+        "-DASIO_NO_DEPRECATED",
+    ],
+    local_include_dirs: [
+        "include",
+    ],
+    header_libs: [
+        "aauto_asio_headers",
+    ],
+}
+
+// standalone asio headers (header-only, no boost)
+cc_library_headers {
+    name: "aauto_asio_headers",
+    export_include_dirs: [
+        "../third_party/asio",
+    ],
+}
+
+// Core static library
+cc_library_static {
+    name: "libaauto-core",
+    defaults: ["aauto_core_defaults"],
+    srcs: [
+        "src/utils/ProtocolConstants.cpp",
+        "src/utils/Logger.cpp",
+    ],
+    export_include_dirs: [
+        "include",
+    ],
+    export_header_lib_headers: [
+        "aauto_asio_headers",
+    ],
+}
+
+// Core unit tests (host + target)
+cc_test {
+    name: "aauto_core_test",
+    defaults: ["aauto_core_defaults"],
+    srcs: [
+        "../tests/core/placeholder_test.cpp",
+    ],
+    static_libs: [
+        "libaauto-core",
+    ],
+    shared_libs: [
+        "liblog",
+    ],
+    test_suites: ["device-tests"],
+}
