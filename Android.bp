@@ -3,6 +3,7 @@
 
 subdirs = [
     "core",
+    "impl",
     "protobuf",
     "tests",
 ]

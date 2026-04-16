@@ -1,0 +1,123 @@
+// aa-v2 platform implementations (adapters)
+
+// Common (OS-agnostic) implementations
+cc_library_static {
+    name: "libaauto-impl-common",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-private-field",
+        "-Wno-implicit-fallthrough",
+        "-DASIO_STANDALONE",
+        "-DASIO_NO_DEPRECATED",
+    ],
+    rtti: true,
+    cppflags: [
+        "-fexceptions",
+    ],
+    srcs: [
+        "common/crypto/OpenSslCryptoStrategy.cpp",
+    ],
+    local_include_dirs: [
+        "common/crypto",
+    ],
+    static_libs: [
+        "libaauto-core",
+    ],
+    shared_libs: [
+        "libssl",
+        "libcrypto",
+    ],
+    header_libs: [
+        "aauto_asio_headers",
+    ],
+    export_include_dirs: [
+        "common/crypto",
+    ],
+}
+
+// Android-specific implementations
+cc_library_static {
+    name: "libaauto-impl-android",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-private-field",
+        "-Wno-implicit-fallthrough",
+        "-DASIO_STANDALONE",
+        "-DASIO_NO_DEPRECATED",
+    ],
+    rtti: true,
+    cppflags: [
+        "-fexceptions",
+    ],
+    srcs: [
+        "android/transport/AndroidUsbTransport.cpp",
+        "android/sink/AMediaCodecVideoSink.cpp",
+    ],
+    local_include_dirs: [
+        "android/transport",
+        "android/sink",
+    ],
+    static_libs: [
+        "libaauto-core",
+    ],
+    shared_libs: [
+        "libmediandk",
+        "libnativewindow",
+        "liblog",
+    ],
+    header_libs: [
+        "aauto_asio_headers",
+    ],
+    export_include_dirs: [
+        "android/transport",
+        "android/sink",
+    ],
+}
+
+// Temporary monolith binary for Phase 1 Walking Skeleton
+cc_binary {
+    name: "aa-engine",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-private-field",
+        "-Wno-implicit-fallthrough",
+        "-DASIO_STANDALONE",
+        "-DASIO_NO_DEPRECATED",
+    ],
+    rtti: true,
+    cppflags: [
+        "-fexceptions",
+    ],
+    srcs: [
+        "android/main/main.cpp",
+    ],
+    local_include_dirs: [
+        "android/transport",
+        "android/sink",
+        "common/crypto",
+    ],
+    static_libs: [
+        "libaauto-core",
+        "libaauto-impl-common",
+        "libaauto-impl-android",
+    ],
+    shared_libs: [
+        "libssl",
+        "libcrypto",
+        "libmediandk",
+        "libnativewindow",
+        "liblog",
+    ],
+    header_libs: [
+        "aauto_asio_headers",
+    ],
+}
