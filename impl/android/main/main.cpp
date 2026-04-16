@@ -110,9 +110,10 @@ int main(int argc, char* argv[]) {
     hu_config.video_height = 480;
     hu_config.video_fps = 30;
     hu_config.video_density = 160;
-    // TODO: load cert paths from build config or command line
-    // hu_config.crypto_config.cert_pem_path = "/system/etc/aa/hu_cert.pem";
-    // hu_config.crypto_config.key_pem_path = "/system/etc/aa/hu_key.pem";
+    // Cert/key: empty config = OpenSslCryptoStrategy falls back to built-in
+    // reference keys (AapKeys.hpp). Override with file paths if needed:
+    //   hu_config.crypto_config.cert_pem_path = "/system/etc/aa/hu_cert.pem";
+    //   hu_config.crypto_config.key_pem_path = "/system/etc/aa/hu_key.pem";
 
     // Create factories
     auto transport_factory = std::make_shared<AndroidTransportFactory>();

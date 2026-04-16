@@ -1,10 +1,12 @@
 #define LOG_TAG "OpenSslCrypto"
 
 #include "OpenSslCryptoStrategy.hpp"
+#include "aauto/crypto/AapKeys.hpp"
 #include "aauto/utils/Logger.hpp"
 #include "aauto/utils/ProtocolConstants.hpp"
 
 #include <openssl/err.h>
+#include <openssl/pem.h>
 
 namespace aauto::impl {
 
@@ -29,24 +31,55 @@ bool OpenSslCryptoStrategy::init_ssl_context(const crypto::CryptoConfig& config)
     // Disable certificate verification (AAP uses custom cert exchange)
     SSL_CTX_set_verify(ctx_.get(), SSL_VERIFY_NONE, nullptr);
 
-    // Load HU certificate
-    if (!config.cert_pem_path.empty()) {
+    // Resolve certificate source: in-memory > file > built-in
+    const std::string& cert = !config.cert_pem.empty() ? config.cert_pem
+                            : !config.cert_pem_path.empty() ? config.cert_pem_path
+                            : crypto::kAapCertificate;
+    const std::string& key = !config.key_pem.empty() ? config.key_pem
+                           : !config.key_pem_path.empty() ? config.key_pem_path
+                           : crypto::kAapPrivateKey;
+
+    bool use_file_cert = config.cert_pem.empty() && !config.cert_pem_path.empty();
+    bool use_file_key = config.key_pem.empty() && !config.key_pem_path.empty();
+
+    // Load certificate
+    if (use_file_cert) {
         if (SSL_CTX_use_certificate_file(ctx_.get(),
-                config.cert_pem_path.c_str(), SSL_FILETYPE_PEM) != 1) {
-            AA_LOG_E("failed to load certificate: %s",
-                     config.cert_pem_path.c_str());
+                cert.c_str(), SSL_FILETYPE_PEM) != 1) {
+            AA_LOG_E("failed to load certificate file: %s", cert.c_str());
             return false;
         }
+    } else {
+        BIO* bio = BIO_new_mem_buf(cert.data(), static_cast<int>(cert.size()));
+        X509* x509 = PEM_read_bio_X509(bio, nullptr, nullptr, nullptr);
+        BIO_free(bio);
+        if (!x509 || SSL_CTX_use_certificate(ctx_.get(), x509) != 1) {
+            if (x509) X509_free(x509);
+            AA_LOG_E("failed to load certificate from memory");
+            return false;
+        }
+        X509_free(x509);
+        AA_LOG_I("certificate loaded from memory");
     }
 
-    // Load HU private key
-    if (!config.key_pem_path.empty()) {
+    // Load private key
+    if (use_file_key) {
         if (SSL_CTX_use_PrivateKey_file(ctx_.get(),
-                config.key_pem_path.c_str(), SSL_FILETYPE_PEM) != 1) {
-            AA_LOG_E("failed to load private key: %s",
-                     config.key_pem_path.c_str());
+                key.c_str(), SSL_FILETYPE_PEM) != 1) {
+            AA_LOG_E("failed to load private key file: %s", key.c_str());
             return false;
         }
+    } else {
+        BIO* bio = BIO_new_mem_buf(key.data(), static_cast<int>(key.size()));
+        EVP_PKEY* pkey = PEM_read_bio_PrivateKey(bio, nullptr, nullptr, nullptr);
+        BIO_free(bio);
+        if (!pkey || SSL_CTX_use_PrivateKey(ctx_.get(), pkey) != 1) {
+            if (pkey) EVP_PKEY_free(pkey);
+            AA_LOG_E("failed to load private key from memory");
+            return false;
+        }
+        EVP_PKEY_free(pkey);
+        AA_LOG_I("private key loaded from memory");
     }
 
     return true;

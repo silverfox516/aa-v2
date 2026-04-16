@@ -38,6 +38,7 @@ cc_library_static {
         "src/service/VideoService.cpp",
         "src/service/AudioService.cpp",
         "src/engine/Engine.cpp",
+        "src/crypto/AapKeys.cpp",
     ],
     export_include_dirs: [
         "include",

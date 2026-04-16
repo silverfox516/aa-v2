@@ -26,6 +26,7 @@ add_library(aauto-core STATIC
     src/service/VideoService.cpp
     src/service/AudioService.cpp
     src/engine/Engine.cpp
+    src/crypto/AapKeys.cpp
 )
 
 target_include_directories(aauto-core PUBLIC

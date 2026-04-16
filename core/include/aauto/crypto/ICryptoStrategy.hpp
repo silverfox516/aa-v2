@@ -54,9 +54,11 @@ public:
 };
 
 struct CryptoConfig {
-    std::string cert_pem_path;  // HU certificate (PEM)
-    std::string key_pem_path;   // HU private key (PEM)
-    // Empty = use build-time injected defaults
+    std::string cert_pem_path;  // HU certificate file path (PEM)
+    std::string key_pem_path;   // HU private key file path (PEM)
+    std::string cert_pem;       // HU certificate in-memory (PEM string)
+    std::string key_pem;        // HU private key in-memory (PEM string)
+    // Priority: in-memory strings if non-empty, else file paths, else built-in defaults
 };
 
 } // namespace aauto::crypto
