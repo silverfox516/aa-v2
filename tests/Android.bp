@@ -1,0 +1,23 @@
+// aa-v2 core unit tests
+
+cc_test {
+    name: "aauto_core_test",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-DASIO_STANDALONE",
+        "-DASIO_NO_DEPRECATED",
+    ],
+    srcs: [
+        "core/placeholder_test.cpp",
+    ],
+    static_libs: [
+        "libaauto-core",
+    ],
+    header_libs: [
+        "aauto_asio_headers",
+    ],
+    test_suites: ["device-tests"],
+}
