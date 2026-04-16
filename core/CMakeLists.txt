@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.14)
+project(aauto-core LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# standalone asio (header-only, no boost)
+add_library(asio INTERFACE)
+target_include_directories(asio INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/asio)
+target_compile_definitions(asio INTERFACE
+    ASIO_STANDALONE
+    ASIO_NO_DEPRECATED)
+
+# Find threading library for asio
+find_package(Threads REQUIRED)
+target_link_libraries(asio INTERFACE Threads::Threads)
+
+# Core library
+add_library(aauto-core STATIC
+    src/utils/ProtocolConstants.cpp
+    src/utils/Logger.cpp
+)
+
+target_include_directories(aauto-core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+target_link_libraries(aauto-core PUBLIC asio)
+
+target_compile_options(aauto-core PRIVATE
+    -Wall -Wextra -Wpedantic -Werror)

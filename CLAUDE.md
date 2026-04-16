@@ -1,0 +1,45 @@
+# Project Guidelines
+
+## Code Quality
+
+- Before writing code, consider appropriate design patterns (Strategy, Factory, RAII, etc.) and overall structure.
+- During bug fixes or improvements, keep the surrounding code clean — do not let incremental changes accumulate into messy code.
+- Prefer clear separation of concerns: transport, platform, service, and session layers must remain independent.
+- Avoid mixing responsibilities within a single class.
+
+## Language
+
+- All source code comments, log messages, and string literals must be in English only.
+- No Korean, no emojis — anywhere in source files.
+
+## Style
+
+- Follow the existing code style in the repository (C++17, 4-space indent, braces on same line for functions).
+- Log tags use the format: `#define LOG_TAG "ClassName"`.
+- Use `AA_LOG_I()`, `AA_LOG_D()`, `AA_LOG_W()`, `AA_LOG_E()` for logging (defined in Logger.hpp).
+
+## Workflow
+
+- Do not jump straight into code changes. When the user describes a problem or request, first explain the plan (what to change, why, affected files), then ask for confirmation before editing any files. Only proceed after explicit approval.
+- Always evaluate ideas objectively — including the user's own suggestions. Do not agree just because the user proposed it. If the analysis points in a different direction, say so with reasoning.
+
+## Architecture Decisions
+
+- Always advocate for the ideal SW architecture proactively. Do not let the user's answers
+  drift the structure — present the objectively best design first, then evaluate trade-offs
+  in the user's context.
+- For every decision the user must make, explain how each option affects the overall
+  architecture (which Part A assumptions hold/break, what trade-offs accumulate).
+- The user is not a SW architecture/design specialist. Unpack jargon, surface long-term
+  consequences, and act as a guardrail. If the user picks against the recommendation,
+  restate the impact and politely invite reconsideration before proceeding; if they
+  insist, follow but record the trade-off explicitly in `docs/architecture_review.md` Part F.
+- Confirmed decisions accumulate in `docs/architecture_review.md` Part F as F.x entries
+  (date, alternatives, choice, rationale).
+
+## Plans
+
+- All plans for this project are stored in this repository under `docs/plans/`.
+- Plan filenames are prefixed with a four-digit zero-padded number (e.g. `0001_intro.md`, `0002_audio_focus.md`).
+- When creating a new plan file, scan the existing files in `docs/plans/` and assign the next sequential number — never reuse a number.
+- Do not store plans for this project in the user-global `~/.claude/plans/` directory; that location is only Claude Code's temporary plan-mode workspace and is not project-scoped.
