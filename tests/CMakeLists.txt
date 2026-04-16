@@ -15,10 +15,14 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-# Placeholder test to verify build system works
+# Core unit tests
 add_executable(aauto_core_test
     core/placeholder_test.cpp
+    core/framer_test.cpp
 )
+
+target_include_directories(aauto_core_test PRIVATE
+    core/mock)
 
 target_link_libraries(aauto_core_test PRIVATE
     aauto-core

@@ -7,11 +7,21 @@ cc_test {
         "-Wall",
         "-Wextra",
         "-Werror",
+        "-Wno-unused-private-field",
+        "-Wno-implicit-fallthrough",
         "-DASIO_STANDALONE",
         "-DASIO_NO_DEPRECATED",
     ],
+    rtti: true,
+    cppflags: [
+        "-fexceptions",
+    ],
+    local_include_dirs: [
+        "core/mock",
+    ],
     srcs: [
         "core/placeholder_test.cpp",
+        "core/framer_test.cpp",
     ],
     static_libs: [
         "libaauto-core",
