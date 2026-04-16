@@ -21,6 +21,11 @@ target_link_libraries(asio INTERFACE Threads::Threads)
 add_library(aauto-core STATIC
     src/utils/ProtocolConstants.cpp
     src/utils/Logger.cpp
+    src/session/Framer.cpp
+    src/session/Session.cpp
+    src/service/VideoService.cpp
+    src/service/AudioService.cpp
+    src/engine/Engine.cpp
 )
 
 target_include_directories(aauto-core PUBLIC

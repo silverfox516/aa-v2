@@ -8,10 +8,15 @@ cc_defaults {
     cflags: [
         "-Wall",
         "-Wextra",
-        "-Wpedantic",
         "-Werror",
+        "-Wno-unused-private-field",
+        "-Wno-implicit-fallthrough",
         "-DASIO_STANDALONE",
         "-DASIO_NO_DEPRECATED",
+    ],
+    rtti: true,
+    cppflags: [
+        "-fexceptions",
     ],
     local_include_dirs: [
         "include",
@@ -28,6 +33,11 @@ cc_library_static {
     srcs: [
         "src/utils/ProtocolConstants.cpp",
         "src/utils/Logger.cpp",
+        "src/session/Framer.cpp",
+        "src/session/Session.cpp",
+        "src/service/VideoService.cpp",
+        "src/service/AudioService.cpp",
+        "src/engine/Engine.cpp",
     ],
     export_include_dirs: [
         "include",
