@@ -102,6 +102,17 @@ public:
 
     void clear_written_data() { written_data_.clear(); }
 
+    /// Inject a read error on the pending async_read (simulates USB disconnect).
+    void inject_read_error(std::error_code ec) {
+        if (pending_read_handler_) {
+            auto h = std::move(pending_read_handler_);
+            pending_read_handler_ = nullptr;
+            asio::post(executor_, [h, ec] {
+                h(ec, 0);
+            });
+        }
+    }
+
 private:
     asio::any_io_executor executor_;
     bool open_;

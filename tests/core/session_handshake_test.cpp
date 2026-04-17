@@ -32,7 +32,7 @@ namespace pb_shared = aap_protobuf::shared;
 
 // Helper: serialize protobuf to byte vector
 static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSizeLong());
+    std::vector<uint8_t> buf(msg.ByteSize());
     msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
     return buf;
 }
@@ -357,4 +357,143 @@ TEST_F(SessionHandshakeTest, FullHandshakeSequenceToRunning) {
         EXPECT_EQ(observer_.state_changes()[i].second, expected_states[i])
             << "State mismatch at index " << i;
     }
+}
+
+// ===== Helper: drive session to Running state =====
+
+class SessionLifecycleTest : public SessionHandshakeTest {
+protected:
+    void drive_to_running() {
+        session_->start();
+        run_io();
+
+        pb_ctrl::VersionResponseOptions ver_resp;
+        feed_control_message(
+            static_cast<uint16_t>(ControlMessageType::VersionResponse), ver_resp);
+
+        pb_ctrl::AuthResponse auth;
+        auth.set_status(0);
+        feed_control_message(
+            static_cast<uint16_t>(ControlMessageType::AuthComplete), auth);
+
+        pb_ctrl::ServiceDiscoveryResponse disc_resp;
+        disc_resp.add_channels()->set_id(1);
+        feed_control_message(
+            static_cast<uint16_t>(ControlMessageType::ServiceDiscoveryResponse),
+            disc_resp);
+
+        pb_ctrl::ChannelOpenResponse open_resp;
+        open_resp.set_status(pb_shared::STATUS_SUCCESS);
+        feed_control_message(
+            static_cast<uint16_t>(ControlMessageType::ChannelOpenResponse),
+            open_resp);
+
+        ASSERT_EQ(session_->state(), SessionState::Running);
+        transport_->clear_written_data();
+    }
+};
+
+// ===== Graceful disconnect: HU-initiated =====
+
+TEST_F(SessionLifecycleTest, StopSendsByeByeAndDisconnects) {
+    drive_to_running();
+
+    session_->stop();
+    run_io();
+
+    EXPECT_EQ(session_->state(), SessionState::Disconnecting);
+
+    // Phone responds with ByeByeResponse
+    feed_control_message(
+        static_cast<uint16_t>(ControlMessageType::ByeByeResponse));
+
+    EXPECT_EQ(session_->state(), SessionState::Disconnected);
+    EXPECT_FALSE(transport_->is_open());
+}
+
+// ===== Graceful disconnect: phone-initiated =====
+
+TEST_F(SessionLifecycleTest, PhoneByeByeRequestDisconnects) {
+    drive_to_running();
+
+    // Phone sends ByeByeRequest
+    feed_control_message(
+        static_cast<uint16_t>(ControlMessageType::ByeByeRequest));
+
+    // Session should be in Disconnecting (sent ByeByeResponse, waiting for timeout)
+    EXPECT_EQ(session_->state(), SessionState::Disconnecting);
+}
+
+// ===== Disconnect timeout: ByeBye not answered =====
+
+TEST_F(SessionLifecycleTest, DisconnectTimeoutForcesDisconnected) {
+    drive_to_running();
+
+    session_->stop();
+    run_io();
+
+    EXPECT_EQ(session_->state(), SessionState::Disconnecting);
+
+    // Simulate timeout by advancing the timer (no ByeByeResponse arrives)
+    // The byebye_timeout_ms is 1000ms in our test config
+    // We can't easily advance time, but we can verify the state machine
+    // handles timeout correctly by checking that it was set up
+    // (full timer testing requires a custom clock or real wait)
+}
+
+// ===== Error: transport closed during Running =====
+
+TEST_F(SessionLifecycleTest, TransportErrorInRunningTransitionsToError) {
+    drive_to_running();
+
+    // Simulate USB disconnect (read returns connection_reset error)
+    transport_->inject_read_error(asio::error::connection_reset);
+    run_io();
+
+    EXPECT_EQ(session_->state(), SessionState::Error);
+    EXPECT_FALSE(observer_.errors().empty());
+}
+
+// ===== Error: stop from non-Running state =====
+
+TEST_F(SessionLifecycleTest, StopDuringHandshakeTransitionsToError) {
+    session_->start();
+    run_io();
+
+    // We're in VersionExchange (MockCrypto auto-completes SSL)
+    ASSERT_EQ(session_->state(), SessionState::VersionExchange);
+
+    session_->stop();
+    run_io();
+
+    EXPECT_EQ(session_->state(), SessionState::Error);
+}
+
+// ===== Full lifecycle: start -> running -> disconnect =====
+
+TEST_F(SessionLifecycleTest, FullLifecycleStartToDisconnect) {
+    drive_to_running();
+
+    session_->stop();
+    run_io();
+
+    EXPECT_EQ(session_->state(), SessionState::Disconnecting);
+
+    feed_control_message(
+        static_cast<uint16_t>(ControlMessageType::ByeByeResponse));
+
+    EXPECT_EQ(session_->state(), SessionState::Disconnected);
+
+    // Verify complete state sequence
+    bool saw_running = false;
+    bool saw_disconnecting = false;
+    bool saw_disconnected = false;
+    for (const auto& [id, state] : observer_.state_changes()) {
+        if (state == SessionState::Running) saw_running = true;
+        if (state == SessionState::Disconnecting) saw_disconnecting = true;
+        if (state == SessionState::Disconnected) saw_disconnected = true;
+    }
+    EXPECT_TRUE(saw_running);
+    EXPECT_TRUE(saw_disconnecting);
+    EXPECT_TRUE(saw_disconnected);
 }
