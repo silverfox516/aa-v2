@@ -16,6 +16,8 @@
 #include <system_error>
 #include <vector>
 
+namespace aauto::engine { struct HeadunitConfig; }
+
 namespace aauto::session {
 
 /// Session -> Engine notification interface.
@@ -48,6 +50,7 @@ class Session : public std::enable_shared_from_this<Session> {
 public:
     Session(asio::any_io_executor executor,
             SessionConfig config,
+            const engine::HeadunitConfig& hu_config,
             std::shared_ptr<transport::ITransport> transport,
             std::shared_ptr<crypto::ICryptoStrategy> crypto,
             ISessionObserver* observer);
@@ -108,9 +111,17 @@ private:
     void handle_control_message(uint16_t msg_type,
                                 const std::vector<uint8_t>& payload);
 
+    // Discovered services from phone (populated during handshake)
+    struct DiscoveredService {
+        int32_t  service_id;
+        uint8_t  assigned_channel;
+    };
+    std::vector<DiscoveredService> discovered_services_;
+
     // Members
     asio::strand<asio::any_io_executor>      strand_;
     SessionConfig                             config_;
+    const engine::HeadunitConfig&             hu_config_;
     std::shared_ptr<transport::ITransport>    transport_;
     std::shared_ptr<crypto::ICryptoStrategy>  crypto_;
     ISessionObserver*                         observer_;

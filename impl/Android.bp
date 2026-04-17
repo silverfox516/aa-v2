@@ -111,6 +111,8 @@ cc_binary {
         "libaauto-impl-android",
     ],
     shared_libs: [
+        "libaapproto",
+        "libprotobuf-cpp-lite-rtti",
         "libssl",
         "libcrypto",
         "libmediandk",

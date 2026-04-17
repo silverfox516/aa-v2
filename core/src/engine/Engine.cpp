@@ -169,7 +169,7 @@ void Engine::do_start_session(const std::string& descriptor, uint32_t sid) {
     sconfig.session_id = sid;
 
     auto session = std::make_shared<session::Session>(
-        io_context_.get_executor(), sconfig,
+        io_context_.get_executor(), sconfig, config_,
         std::move(transport), std::move(crypto), this);
 
     sessions_[sid] = session;

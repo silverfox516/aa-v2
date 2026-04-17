@@ -25,6 +25,9 @@ cc_library_shared {
     shared_libs: [
         "libprotobuf-cpp-lite-rtti",
     ],
+    export_shared_lib_headers: [
+        "libprotobuf-cpp-lite-rtti",
+    ],
 
     rtti: true,
 }

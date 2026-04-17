@@ -46,5 +46,8 @@ cc_library_static {
     export_header_lib_headers: [
         "aauto_asio_headers",
     ],
+    shared_libs: [
+        "libaapproto",
+    ],
 }
 

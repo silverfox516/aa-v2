@@ -60,10 +60,12 @@ if(NOT SKIP_BUILD_ABSL AND NOT SKIP_BUILD_PROTOBUF)
     # Save current compiler flags to restore later
     set(SAVED_CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 
-    # Remove -pedantic from flags for external dependencies (Abseil, Protobuf)
-    # These external libraries may have valid code that triggers pedantic warnings
+    # Suppress -Wpedantic for external dependencies (Abseil, Protobuf)
+    # Abseil uses __int128 which triggers -Wpedantic errors with -Werror
     string(REPLACE " -pedantic" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-    message(STATUS "Temporarily disabled -pedantic flag for external dependency compilation")
+    string(REPLACE " -Wpedantic" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-pedantic")
+    message(STATUS "Added -Wno-pedantic for external dependency compilation")
 
     set(ABSL_PROPAGATE_CXX_STD ON CACHE BOOL "" FORCE)
     set(ABSL_BUILD_TESTING OFF CACHE BOOL "" FORCE)

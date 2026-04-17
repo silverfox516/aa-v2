@@ -32,7 +32,7 @@ add_library(aauto-core STATIC
 target_include_directories(aauto-core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-target_link_libraries(aauto-core PUBLIC asio)
+target_link_libraries(aauto-core PUBLIC asio aap_protobuf)
 
 target_compile_options(aauto-core PRIVATE
     -Wall -Wextra -Wpedantic -Werror)

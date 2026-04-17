@@ -1,19 +1,49 @@
 #define LOG_TAG "Session"
 
 #include "aauto/session/Session.hpp"
+#include "aauto/engine/Engine.hpp"
 #include "aauto/utils/Logger.hpp"
+
+#include <aap_protobuf/service/control/message/VersionRequestOptions.pb.h>
+#include <aap_protobuf/service/control/message/VersionResponseOptions.pb.h>
+#include <aap_protobuf/service/control/message/AuthResponse.pb.h>
+#include <aap_protobuf/service/control/message/ServiceDiscoveryRequest.pb.h>
+#include <aap_protobuf/service/control/message/ServiceDiscoveryResponse.pb.h>
+#include <aap_protobuf/service/control/message/ChannelOpenRequest.pb.h>
+#include <aap_protobuf/service/control/message/ChannelOpenResponse.pb.h>
+#include <aap_protobuf/service/control/message/HeadUnitInfo.pb.h>
+#include <aap_protobuf/service/control/message/PingRequest.pb.h>
+#include <aap_protobuf/service/control/message/PingResponse.pb.h>
+#include <aap_protobuf/service/control/message/ByeByeRequest.pb.h>
+#include <aap_protobuf/service/control/message/ByeByeReason.pb.h>
+#include <aap_protobuf/service/Service.pb.h>
+#include <aap_protobuf/shared/MessageStatus.pb.h>
 
 #include <chrono>
 
 namespace aauto::session {
 
+namespace pb_ctrl = aap_protobuf::service::control::message;
+namespace pb_ver  = aap_protobuf::channel::control::version;
+namespace pb_svc  = aap_protobuf::service;
+namespace pb_shared = aap_protobuf::shared;
+
+// Helper: serialize protobuf to byte vector
+static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
+    std::vector<uint8_t> buf(msg.ByteSize());
+    msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
+    return buf;
+}
+
 Session::Session(asio::any_io_executor executor,
                  SessionConfig config,
+                 const engine::HeadunitConfig& hu_config,
                  std::shared_ptr<transport::ITransport> transport,
                  std::shared_ptr<crypto::ICryptoStrategy> crypto,
                  ISessionObserver* observer)
     : strand_(asio::make_strand(executor))
     , config_(config)
+    , hu_config_(hu_config)
     , transport_(std::move(transport))
     , crypto_(std::move(crypto))
     , observer_(observer)
@@ -44,15 +74,14 @@ void Session::stop() {
         if (is_terminal(self->state_)) return;
 
         if (self->state_ == SessionState::Running) {
-            // Send ByeBye request
             self->transition_to(SessionState::Disconnecting);
             self->start_state_timer(self->config_.byebye_timeout_ms);
 
-            // Build ByeByeRequest: reason = USER_SELECTION(1)
-            std::vector<uint8_t> payload = {0x08, 0x01};  // field 1, varint 1
+            pb_ctrl::ByeByeRequest bye;
+            bye.set_reason(pb_ctrl::USER_SELECTION);
             self->send_message(kControlChannelId,
                 static_cast<uint16_t>(ControlMessageType::ByeByeRequest),
-                payload);
+                serialize(bye));
         } else {
             self->handle_error(make_error_code(AapErrc::SessionTerminated));
         }
@@ -356,60 +385,118 @@ void Session::on_ssl_complete() {
 }
 
 void Session::send_version_request() {
-    // VERSION_REQUEST: protocol version 1.6
-    // Minimal protobuf encoding for VersionRequestOptions
-    // (may need to be empty or contain snapshot_version)
-    std::vector<uint8_t> payload;
+    // VersionRequestOptions is optional; empty message is valid for protocol 1.6
+    pb_ver::VersionRequestOptions req;
     send_message(kControlChannelId,
         static_cast<uint16_t>(ControlMessageType::VersionRequest),
-        payload);
-    AA_LOG_D("sent VERSION_REQUEST");
+        serialize(req));
+    AA_LOG_D("sent VERSION_REQUEST (protocol %u.%u)",
+             kProtocolVersionMajor, kProtocolVersionMinor);
 }
 
 void Session::on_version_response(const std::vector<uint8_t>& payload) {
-    // TODO: parse VersionResponseOptions, extract ConnectionConfiguration
-    (void)payload;
-    AA_LOG_I("received VERSION_RESPONSE");
-    // Wait for AUTH_COMPLETE from device
+    pb_ctrl::VersionResponseOptions resp;
+    if (!resp.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
+        AA_LOG_W("failed to parse VERSION_RESPONSE, continuing anyway");
+    }
+
+    // Extract ping configuration if provided
+    if (resp.has_connection_configuration() &&
+        resp.connection_configuration().has_ping_configuration()) {
+        const auto& ping = resp.connection_configuration().ping_configuration();
+        if (ping.has_interval_ms() && ping.interval_ms() > 0) {
+            config_.ping_interval_ms = ping.interval_ms();
+            AA_LOG_D("ping interval updated: %u ms", config_.ping_interval_ms);
+        }
+        if (ping.has_timeout_ms() && ping.timeout_ms() > 0) {
+            config_.ping_timeout_ms = ping.timeout_ms();
+            AA_LOG_D("ping timeout updated: %u ms", config_.ping_timeout_ms);
+        }
+    }
+
+    AA_LOG_I("received VERSION_RESPONSE, waiting for AUTH_COMPLETE");
+    // Stay in VersionExchange state, wait for AUTH_COMPLETE from device
 }
 
 void Session::on_auth_complete(const std::vector<uint8_t>& payload) {
-    (void)payload;
-    AA_LOG_I("received AUTH_COMPLETE");
+    pb_ctrl::AuthResponse auth;
+    if (!auth.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
+        AA_LOG_E("failed to parse AUTH_COMPLETE");
+        handle_error(make_error_code(AapErrc::AuthFailed));
+        return;
+    }
+
+    if (auth.status() != static_cast<int32_t>(pb_shared::STATUS_SUCCESS)) {
+        AA_LOG_E("AUTH_COMPLETE failed with status %d", auth.status());
+        handle_error(make_error_code(AapErrc::AuthFailed));
+        return;
+    }
+
+    AA_LOG_I("AUTH_COMPLETE success");
     transition_to(SessionState::ServiceDiscovery);
     start_state_timer(config_.service_discovery_timeout_ms);
     send_service_discovery_request();
 }
 
 void Session::send_service_discovery_request() {
-    // TODO: build ServiceDiscoveryRequest with device_name, icons
-    std::vector<uint8_t> payload;
+    pb_ctrl::ServiceDiscoveryRequest req;
+    req.set_device_name(hu_config_.display_name);
+
     send_message(kControlChannelId,
         static_cast<uint16_t>(ControlMessageType::ServiceDiscoveryRequest),
-        payload);
-    AA_LOG_D("sent SERVICE_DISCOVERY_REQUEST");
+        serialize(req));
+    AA_LOG_D("sent SERVICE_DISCOVERY_REQUEST (device=%s)",
+             hu_config_.display_name.c_str());
 }
 
 void Session::on_service_discovery_response(const std::vector<uint8_t>& payload) {
-    // TODO: parse ServiceDiscoveryResponse to enumerate available services
-    (void)payload;
-    AA_LOG_I("received SERVICE_DISCOVERY_RESPONSE");
+    pb_ctrl::ServiceDiscoveryResponse resp;
+    if (!resp.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
+        AA_LOG_E("failed to parse SERVICE_DISCOVERY_RESPONSE");
+        handle_error(make_error_code(AapErrc::ServiceDiscoveryFailed));
+        return;
+    }
+
+    AA_LOG_I("SERVICE_DISCOVERY_RESPONSE: %d channels", resp.channels_size());
+
+    // Store discovered services for channel opening
+    discovered_services_.clear();
+    for (const auto& ch : resp.channels()) {
+        AA_LOG_D("  service id=%d", ch.id());
+        discovered_services_.push_back({ch.id(), 0});
+    }
+
+    if (discovered_services_.empty()) {
+        AA_LOG_W("no services discovered from phone");
+        handle_error(make_error_code(AapErrc::ServiceDiscoveryFailed));
+        return;
+    }
+
     transition_to(SessionState::ChannelSetup);
     start_state_timer(config_.channel_setup_timeout_ms);
     open_channels();
 }
 
 void Session::open_channels() {
-    // TODO: for each discovered service, send CHANNEL_OPEN_REQUEST
-    // For now, this is a placeholder that transitions directly to Running.
-    // In full implementation:
-    //   for each service_config in discovery_response:
-    //     send ChannelOpenRequest(service_id, priority)
-    //     pending_channel_opens_++
-    //
-    // When all ChannelOpenResponses received -> transition to Running
-
     pending_channel_opens_ = 0;
+
+    for (auto& ds : discovered_services_) {
+        uint8_t ch = next_channel_id_++;
+        ds.assigned_channel = ch;
+        service_id_to_channel_[ds.service_id] = ch;
+
+        pb_ctrl::ChannelOpenRequest req;
+        req.set_priority(0);
+        req.set_service_id(ds.service_id);
+
+        send_message(kControlChannelId,
+            static_cast<uint16_t>(ControlMessageType::ChannelOpenRequest),
+            serialize(req));
+        pending_channel_opens_++;
+
+        AA_LOG_D("sent CHANNEL_OPEN_REQUEST: service_id=%d -> channel=%u",
+                 ds.service_id, ch);
+    }
 
     if (pending_channel_opens_ == 0) {
         transition_to(SessionState::Running);
@@ -418,12 +505,22 @@ void Session::open_channels() {
 }
 
 void Session::on_channel_open_response(const std::vector<uint8_t>& payload) {
-    // TODO: parse response, check MessageStatus, register service
-    (void)payload;
+    pb_ctrl::ChannelOpenResponse resp;
+    if (!resp.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
+        AA_LOG_W("failed to parse CHANNEL_OPEN_RESPONSE");
+    } else {
+        auto status = resp.status();
+        if (status != pb_shared::STATUS_SUCCESS) {
+            AA_LOG_W("CHANNEL_OPEN_RESPONSE status=%d", static_cast<int>(status));
+        }
+    }
+
     pending_channel_opens_--;
+    AA_LOG_D("CHANNEL_OPEN_RESPONSE received, pending=%d", pending_channel_opens_);
 
     if (pending_channel_opens_ <= 0
         && state_ == SessionState::ChannelSetup) {
+        AA_LOG_I("all channels opened, transitioning to Running");
         transition_to(SessionState::Running);
         start_ping_timer();
     }
@@ -445,26 +542,15 @@ void Session::start_ping_timer() {
 void Session::send_ping() {
     if (state_ != SessionState::Running) return;
 
-    // PingRequest: field 1 = timestamp (int64)
     auto now = std::chrono::steady_clock::now().time_since_epoch();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
 
-    // Simple protobuf: field 1 (wire type 0 = varint), value = ms
-    // For simplicity, send timestamp as raw bytes in payload
-    std::vector<uint8_t> payload;
-    // protobuf field 1, wire type 0: tag = 0x08
-    payload.push_back(0x08);
-    // Encode varint
-    auto val = static_cast<uint64_t>(ms);
-    while (val > 0x7F) {
-        payload.push_back(static_cast<uint8_t>((val & 0x7F) | 0x80));
-        val >>= 7;
-    }
-    payload.push_back(static_cast<uint8_t>(val));
+    pb_ctrl::PingRequest ping;
+    ping.set_timestamp(ms);
 
     send_message(kControlChannelId,
         static_cast<uint16_t>(ControlMessageType::PingRequest),
-        payload);
+        serialize(ping));
 
     // Start ping timeout
     ping_timeout_timer_.expires_after(
@@ -507,7 +593,7 @@ void Session::handle_control_message(uint16_t msg_type,
             on_channel_open_response(payload);
             break;
         case ControlMessageType::PingRequest: {
-            // Respond with same timestamp
+            // Respond with same payload (echo timestamp)
             send_message(kControlChannelId,
                 static_cast<uint16_t>(ControlMessageType::PingResponse),
                 payload);
@@ -531,7 +617,6 @@ void Session::handle_control_message(uint16_t msg_type,
             transport_->close();
             break;
         case ControlMessageType::AudioFocusRequest:
-            // TODO: handle audio focus
             AA_LOG_D("audio focus request received");
             break;
         case ControlMessageType::NavFocusRequest:

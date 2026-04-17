@@ -19,6 +19,7 @@ enable_testing()
 add_executable(aauto_core_test
     core/placeholder_test.cpp
     core/framer_test.cpp
+    core/session_handshake_test.cpp
 )
 
 target_include_directories(aauto_core_test PRIVATE
@@ -26,6 +27,7 @@ target_include_directories(aauto_core_test PRIVATE
 
 target_link_libraries(aauto_core_test PRIVATE
     aauto-core
+    aap_protobuf
     GTest::gtest_main)
 
 include(GoogleTest)
