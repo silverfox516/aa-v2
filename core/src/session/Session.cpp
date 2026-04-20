@@ -2,6 +2,7 @@
 
 #include "aauto/session/Session.hpp"
 #include "aauto/utils/Logger.hpp"
+#include "aauto/utils/ProtocolUtil.hpp"
 
 #include <aap_protobuf/service/control/message/AuthResponse.pb.h>
 
@@ -228,8 +229,9 @@ void Session::dispatch_frame(AapFrame frame) {
 
 void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
                                  std::vector<uint8_t> payload) {
-    AA_LOG_D("rx: ch=%u type=%u size=%zu state=%s",
-             channel_id, msg_type, payload.size(), to_string(state_));
+    AA_LOG_D("rx [%s] %s (%zu bytes) state=%s",
+             channel_name(channel_id), msg_type_name(msg_type),
+             payload.size(), to_string(state_));
 
     // During handshake, Session handles VERSION and SSL messages directly.
     // After handshake (Running), ALL messages go to registered services.
@@ -244,7 +246,7 @@ void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
                 on_ssl_data_received(payload.data(), payload.size());
                 return;
             default:
-                AA_LOG_W("unexpected message type %u during handshake", msg_type);
+                AA_LOG_W("unexpected %s during handshake", msg_type_name(msg_type));
                 return;
         }
     }
@@ -254,7 +256,8 @@ void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
     if (it != services_.end()) {
         it->second->on_message(msg_type, payload.data(), payload.size());
     } else {
-        AA_LOG_W("message on unknown channel %u, type %u", channel_id, msg_type);
+        AA_LOG_W("no service for [%s] %s", channel_name(channel_id),
+                 msg_type_name(msg_type));
     }
 }
 

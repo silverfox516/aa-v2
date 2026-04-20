@@ -2,6 +2,7 @@
 
 #include "aauto/service/IService.hpp"
 #include "aauto/utils/ProtocolConstants.hpp"
+#include "aauto/utils/ProtocolUtil.hpp"
 #include "aauto/utils/Logger.hpp"
 
 #include <map>
@@ -31,8 +32,8 @@ public:
         // CHANNEL_OPEN_REQUEST: auto-respond with SUCCESS
         if (message_type ==
                 static_cast<uint16_t>(ControlMessageType::ChannelOpenRequest)) {
-            AA_LOG_I("ch %u: ChannelOpenRequest received, responding SUCCESS",
-                     channel_id_);
+            AA_LOG_I("[%s] ChannelOpenRequest -> SUCCESS",
+                     channel_name(channel_id_));
             on_channel_open(channel_id_);
             // Respond with ChannelOpenResponse(SUCCESS)
             // Minimal protobuf: field 1 (MessageStatus), varint 0 (SUCCESS)
@@ -46,8 +47,9 @@ public:
         if (it != handlers_.end()) {
             it->second(payload, payload_size);
         } else {
-            AA_LOG_W("ch %u: unhandled message type %u (%zu bytes)",
-                     channel_id_, message_type, payload_size);
+            AA_LOG_W("[%s] unhandled %s (%zu bytes)",
+                     channel_name(channel_id_), msg_type_name(message_type),
+                     payload_size);
         }
     }
 

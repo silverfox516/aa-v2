@@ -5,6 +5,7 @@
 #include "aauto/utils/Logger.hpp"
 
 #include <aap_protobuf/service/control/message/ServiceDiscoveryRequest.pb.h>
+#include <aap_protobuf/shared/PhoneInfo.pb.h>
 #include <aap_protobuf/service/control/message/ServiceDiscoveryResponse.pb.h>
 #include <aap_protobuf/service/control/message/HeadUnitInfo.pb.h>
 #include <aap_protobuf/service/control/message/DriverPosition.pb.h>
@@ -55,12 +56,15 @@ ControlService::ControlService(
         [this](const uint8_t* data, std::size_t size) {
             pb_ctrl::ServiceDiscoveryRequest req;
             if (req.ParseFromArray(data, static_cast<int>(size))) {
-                AA_LOG_I("ServiceDiscoveryRequest (%zu bytes): "
-                         "device=%s label=%s has_phone_info=%d",
-                         size,
-                         req.has_device_name() ? req.device_name().c_str() : "(none)",
-                         req.has_label_text() ? req.label_text().c_str() : "(none)",
-                         req.has_phone_info());
+                AA_LOG_I("phone connected: %s (%s)",
+                         req.has_device_name() ? req.device_name().c_str() : "unknown",
+                         req.has_label_text() ? req.label_text().c_str() : "");
+                if (req.has_phone_info()) {
+                    const auto& pi = req.phone_info();
+                    if (pi.has_instance_id()) {
+                        AA_LOG_I("  instance_id: %s", pi.instance_id().c_str());
+                    }
+                }
             }
             send_service_discovery_response();
         });
@@ -92,8 +96,27 @@ ControlService::ControlService(
                     state = pb_ctrl::AUDIO_FOCUS_STATE_GAIN;
                     break;
             }
-            AA_LOG_I("audio focus: request=%d -> response=%d",
-                     request_type, state);
+            static auto focus_req_name = [](int t) -> const char* {
+                switch (t) {
+                    case 1: return "GAIN";
+                    case 2: return "GAIN_TRANSIENT";
+                    case 3: return "GAIN_TRANSIENT_MAY_DUCK";
+                    case 4: return "RELEASE";
+                    default: return "UNKNOWN";
+                }
+            };
+            static auto focus_state_name = [](int s) -> const char* {
+                switch (s) {
+                    case 1: return "GAIN";
+                    case 2: return "GAIN_TRANSIENT";
+                    case 3: return "LOSS";
+                    case 5: return "LOSS_TRANSIENT";
+                    case 7: return "GAIN_TRANSIENT_GUIDANCE_ONLY";
+                    default: return "UNKNOWN";
+                }
+            };
+            AA_LOG_I("audio focus: %s -> %s",
+                     focus_req_name(request_type), focus_state_name(state));
             pb_ctrl::AudioFocusNotification notif;
             notif.set_focus_state(state);
             notif.set_unsolicited(false);

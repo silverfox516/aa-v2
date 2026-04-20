@@ -2,6 +2,8 @@
 
 #include <cstdio>
 #include <cstdarg>
+#include <chrono>
+#include <ctime>
 
 namespace aauto {
 
@@ -16,7 +18,17 @@ void default_log(LogLevel level, const char* tag, const char* fmt,
         case LogLevel::Warn:  level_str = "W"; break;
         case LogLevel::Error: level_str = "E"; break;
     }
-    std::fprintf(stderr, "[%s/%s] ", level_str, tag);
+
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()).count() % 1000;
+    struct tm tm_buf;
+    localtime_r(&time_t_now, &tm_buf);
+
+    std::fprintf(stderr, "%02d:%02d:%02d.%03d [%s/%s] ",
+                 tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec,
+                 static_cast<int>(ms), level_str, tag);
     std::vfprintf(stderr, fmt, args);
     std::fputc('\n', stderr);
 }
