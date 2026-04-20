@@ -1,6 +1,5 @@
 package com.aauto.app;
 
-import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -28,9 +27,6 @@ import android.util.Log;
  */
 public class UsbMonitor {
     private static final String TAG = "AA.UsbMonitor";
-    private static final String ACTION_USB_PERMISSION =
-            "com.aauto.app.USB_PERMISSION";
-
     // AOA protocol
     private static final int AOA_GET_PROTOCOL = 51;
     private static final int AOA_SEND_STRING  = 52;
@@ -71,17 +67,7 @@ public class UsbMonitor {
         public void onReceive(Context ctx, Intent intent) {
             String action = intent.getAction();
 
-            if (ACTION_USB_PERMISSION.equals(action)) {
-                boolean granted = intent.getBooleanExtra(
-                        UsbManager.EXTRA_PERMISSION_GRANTED, false);
-                UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-                if (granted && device != null) {
-                    handleDeviceWithPermission(device);
-                } else {
-                    Log.w(TAG, "USB permission denied");
-                }
-
-            } else if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
+            if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
                 UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
                 if (device != null) {
                     onDeviceAttached(device);
@@ -103,7 +89,6 @@ public class UsbMonitor {
 
     public void start() {
         IntentFilter filter = new IntentFilter();
-        filter.addAction(ACTION_USB_PERMISSION);
         filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
         context.registerReceiver(receiver, filter);
@@ -149,35 +134,20 @@ public class UsbMonitor {
         }
     }
 
-    private void handleDeviceWithPermission(UsbDevice device) {
-        if (isAoaDevice(device.getVendorId(), device.getProductId())) {
-            openAoaDevice(device);
-        } else {
-            performAoaSwitch(device);
-        }
-    }
-
     private void requestPermissionAndOpen(UsbDevice device) {
-        if (usbManager.hasPermission(device)) {
-            openAoaDevice(device);
-        } else {
-            PendingIntent pi = PendingIntent.getBroadcast(context, 0,
-                    new Intent(ACTION_USB_PERMISSION), 0);
-            usbManager.requestPermission(device, pi);
-        }
+        // System app with platform certificate — permission is granted
+        // automatically. Skip requestPermission() to avoid popup.
+        openAoaDevice(device);
     }
 
     private void requestPermissionAndSwitch(UsbDevice device) {
-        if (usbManager.hasPermission(device)) {
-            performAoaSwitch(device);
-        } else {
-            PendingIntent pi = PendingIntent.getBroadcast(context, 0,
-                    new Intent(ACTION_USB_PERMISSION), 0);
-            usbManager.requestPermission(device, pi);
-        }
+        performAoaSwitch(device);
     }
 
     private void performAoaSwitch(UsbDevice device) {
+        if (!usbManager.hasPermission(device)) {
+            usbManager.grantPermission(device);
+        }
         UsbDeviceConnection conn = usbManager.openDevice(device);
         if (conn == null) {
             Log.e(TAG, "failed to open device for AOA switch");
@@ -221,6 +191,10 @@ public class UsbMonitor {
     }
 
     private void openAoaDevice(UsbDevice device) {
+        if (!usbManager.hasPermission(device)) {
+            // Platform-signed app can grant permission to itself
+            usbManager.grantPermission(device);
+        }
         UsbDeviceConnection conn = usbManager.openDevice(device);
         if (conn == null) {
             Log.e(TAG, "failed to open AOA device");
