@@ -122,6 +122,11 @@ void Session::send_raw(uint8_t channel_id, uint16_t message_type,
 // ===== Write queue =====
 
 void Session::enqueue_write(std::vector<uint8_t> wire_data) {
+    if (write_queue_.size() >= kMaxWriteQueueSize) {
+        AA_LOG_W("write queue full (%zu), dropping frame",
+                 write_queue_.size());
+        return;
+    }
     write_queue_.push(std::move(wire_data));
     if (!write_in_progress_) {
         do_write_next();

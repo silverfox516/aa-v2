@@ -99,6 +99,8 @@ private:
     Framer                                    framer_;
     SessionState                              state_ = SessionState::Idle;
 
+    static constexpr std::size_t kMaxWriteQueueSize = 256;
+
     std::array<uint8_t, 16384>                read_buffer_;
     std::queue<std::vector<uint8_t>>          write_queue_;
     bool                                      write_in_progress_ = false;
