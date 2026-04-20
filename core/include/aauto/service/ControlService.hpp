@@ -40,6 +40,8 @@ public:
         session_close_cb_ = std::move(cb);
     }
 
+    void set_session_tag(std::string tag) { session_tag_ = std::move(tag); }
+
     void on_session_stop() override;
 
 private:
@@ -52,6 +54,7 @@ private:
     const engine::HeadunitConfig& hu_config_;
     std::map<int32_t, std::shared_ptr<IService>> peer_services_;
     SessionCloseCallback session_close_cb_;
+    std::string session_tag_;
 
     // Heartbeat
     std::thread heartbeat_thread_;

@@ -3,6 +3,7 @@
 #include "aauto/service/ControlService.hpp"
 #include "aauto/engine/Engine.hpp"
 #include "aauto/utils/Logger.hpp"
+#include "aauto/utils/ProtocolUtil.hpp"
 
 #include <aap_protobuf/service/control/message/ServiceDiscoveryRequest.pb.h>
 #include <aap_protobuf/shared/PhoneInfo.pb.h>
@@ -56,8 +57,9 @@ ControlService::ControlService(
         [this](const uint8_t* data, std::size_t size) {
             pb_ctrl::ServiceDiscoveryRequest req;
             if (req.ParseFromArray(data, static_cast<int>(size))) {
-                AA_LOG_I("phone connected: %s (%s)",
-                         req.has_device_name() ? req.device_name().c_str() : "unknown",
+                std::string phone_name = req.has_device_name()
+                    ? req.device_name() : "unknown";
+                AA_LOG_I("phone connected: %s (%s)", phone_name.c_str(),
                          req.has_label_text() ? req.label_text().c_str() : "");
                 if (req.has_phone_info()) {
                     const auto& pi = req.phone_info();
@@ -65,6 +67,12 @@ ControlService::ControlService(
                         AA_LOG_I("  instance_id: %s", pi.instance_id().c_str());
                     }
                 }
+                // Append phone name to session tag for all subsequent logs.
+                // Strip manufacturer prefix (e.g., "samsung SM-N981N" -> "SM-N981N")
+                auto pos = phone_name.find(' ');
+                std::string short_name = (pos != std::string::npos)
+                    ? phone_name.substr(pos + 1) : phone_name;
+                set_session_tag(session_tag_ + ":" + short_name);
             }
             send_service_discovery_response();
         });
@@ -187,7 +195,10 @@ void ControlService::on_channel_open(uint8_t channel_id) {
     last_pong_ns_ = steady_now_ns();
     close_triggered_ = false;
     running_ = true;
-    heartbeat_thread_ = std::thread([this] { heartbeat_loop(); });
+    heartbeat_thread_ = std::thread([this] {
+        set_session_tag(session_tag_);
+        heartbeat_loop();
+    });
 }
 
 void ControlService::on_channel_close() {

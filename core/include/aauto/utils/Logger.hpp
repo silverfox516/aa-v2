@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdarg>
+#include <string>
 
 namespace aauto {
 
@@ -11,6 +12,10 @@ using LogFunction = void(*)(LogLevel level, const char* tag,
 
 void set_log_function(LogFunction fn);
 void log_impl(LogLevel level, const char* tag, const char* fmt, ...);
+
+/// Set a per-thread session tag (e.g., "s1:SM-N981N").
+/// Shown in every log line from this thread. Pass empty to clear.
+void set_session_tag(const std::string& tag);
 
 } // namespace aauto
 

@@ -45,7 +45,10 @@ SessionState Session::state() const {
 
 void Session::start() {
     auto self = shared_from_this();
-    asio::post(strand_, [self] { self->begin_version_exchange(); });
+    asio::post(strand_, [self] {
+        set_session_tag("s" + std::to_string(self->config_.session_id));
+        self->begin_version_exchange();
+    });
 }
 
 void Session::stop() {

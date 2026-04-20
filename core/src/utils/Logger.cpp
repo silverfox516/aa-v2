@@ -4,10 +4,13 @@
 #include <cstdarg>
 #include <chrono>
 #include <ctime>
+#include <string>
 
 namespace aauto {
 
 namespace {
+
+thread_local std::string g_session_tag;
 
 void default_log(LogLevel level, const char* tag, const char* fmt,
                  va_list args) {
@@ -26,9 +29,16 @@ void default_log(LogLevel level, const char* tag, const char* fmt,
     struct tm tm_buf;
     localtime_r(&time_t_now, &tm_buf);
 
-    std::fprintf(stderr, "%02d:%02d:%02d.%03d [%s/%s] ",
-                 tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec,
-                 static_cast<int>(ms), level_str, tag);
+    if (g_session_tag.empty()) {
+        std::fprintf(stderr, "%02d:%02d:%02d.%03d [%s/%s] ",
+                     tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec,
+                     static_cast<int>(ms), level_str, tag);
+    } else {
+        std::fprintf(stderr, "%02d:%02d:%02d.%03d %s [%s/%s] ",
+                     tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec,
+                     static_cast<int>(ms), g_session_tag.c_str(),
+                     level_str, tag);
+    }
     std::vfprintf(stderr, fmt, args);
     std::fputc('\n', stderr);
 }
@@ -46,6 +56,10 @@ void log_impl(LogLevel level, const char* tag, const char* fmt, ...) {
     va_start(args, fmt);
     g_log_fn(level, tag, fmt, args);
     va_end(args);
+}
+
+void set_session_tag(const std::string& tag) {
+    g_session_tag = tag;
 }
 
 } // namespace aauto
