@@ -1,5 +1,6 @@
 #pragma once
 
+#include "aauto/engine/HeadunitConfig.hpp"
 #include "aauto/engine/IEngineController.hpp"
 #include "aauto/session/Session.hpp"
 #include "aauto/crypto/ICryptoStrategy.hpp"
@@ -39,24 +40,6 @@ public:
     virtual ~IServiceFactory() = default;
     virtual std::map<int32_t, std::shared_ptr<service::IService>>
         create_services(service::SendMessageFn send_fn) = 0;
-};
-
-struct HeadunitConfig {
-    std::string hu_make      = "TCC";
-    std::string hu_model     = "TCC803x";
-    std::string hu_sw_ver    = "1.0.0";
-    std::string display_name = "Android Auto";
-
-    uint32_t video_width   = 800;
-    uint32_t video_height  = 480;
-    uint32_t video_fps     = 30;
-    uint32_t video_density = 160;
-
-    uint32_t audio_sample_rate = 48000;
-    uint32_t audio_bit_depth   = 16;
-    uint32_t audio_channels    = 2;
-
-    crypto::CryptoConfig crypto_config;
 };
 
 /// Top-level engine. Owns io_context, manages sessions.

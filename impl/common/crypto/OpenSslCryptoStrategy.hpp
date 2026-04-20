@@ -13,7 +13,7 @@
 namespace aauto::impl {
 
 /// ICryptoStrategy implementation using OpenSSL.
-/// Performs SSL/TLS handshake as server (HU acts as TLS server).
+/// Performs SSL/TLS handshake as client (HU acts as TLS client).
 /// After handshake, encrypts/decrypts payload with the negotiated session keys.
 class OpenSslCryptoStrategy : public crypto::ICryptoStrategy {
 public:

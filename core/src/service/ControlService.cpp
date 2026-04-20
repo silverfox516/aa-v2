@@ -1,7 +1,7 @@
 #define LOG_TAG "AA.ControlService"
 
 #include "aauto/service/ControlService.hpp"
-#include "aauto/engine/Engine.hpp"
+#include "aauto/engine/HeadunitConfig.hpp"
 #include "aauto/utils/Logger.hpp"
 #include "aauto/utils/ProtocolUtil.hpp"
 

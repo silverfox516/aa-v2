@@ -15,7 +15,7 @@
 ## Style
 
 - Follow the existing code style in the repository (C++17, 4-space indent, braces on same line for functions).
-- Log tags use the format: `#define LOG_TAG "ClassName"`.
+- Log tags use the format: `#define LOG_TAG "AA.ClassName"`.
 - Use `AA_LOG_I()`, `AA_LOG_D()`, `AA_LOG_W()`, `AA_LOG_E()` for logging (defined in Logger.hpp).
 
 ## Workflow
