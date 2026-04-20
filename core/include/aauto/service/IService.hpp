@@ -5,6 +5,8 @@
 #include <functional>
 #include <vector>
 
+namespace aap_protobuf::service { class ServiceConfiguration; }
+
 namespace aauto::service {
 
 enum class ServiceType : uint32_t {
@@ -47,6 +49,11 @@ public:
     virtual void on_channel_close() = 0;
 
     virtual ServiceType type() const = 0;
+
+    /// Fill this service's ServiceConfiguration for ServiceDiscoveryResponse.
+    /// Each service knows its own proto configuration.
+    virtual void fill_config(
+        aap_protobuf::service::ServiceConfiguration* config) = 0;
 };
 
 } // namespace aauto::service

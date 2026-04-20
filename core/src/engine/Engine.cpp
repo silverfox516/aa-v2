@@ -172,6 +172,18 @@ void Engine::do_start_session(const std::string& descriptor, uint32_t sid) {
         io_context_.get_executor(), sconfig, config_,
         std::move(transport), std::move(crypto), this);
 
+    // Register services before starting the session
+    auto send_fn = [weak = std::weak_ptr<session::Session>(session)](
+            uint8_t ch, uint16_t type, const std::vector<uint8_t>& payload) {
+        if (auto s = weak.lock()) {
+            s->send_message(ch, type, payload);
+        }
+    };
+    auto services = service_factory_->create_services(send_fn);
+    for (auto& [service_id, svc] : services) {
+        session->register_service(static_cast<uint8_t>(service_id), std::move(svc));
+    }
+
     sessions_[sid] = session;
 
     if (active_session_id_ == 0) {

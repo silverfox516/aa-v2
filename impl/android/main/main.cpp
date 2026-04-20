@@ -2,6 +2,9 @@
 
 #include "aauto/engine/Engine.hpp"
 #include "aauto/service/VideoService.hpp"
+#include "aauto/service/AudioService.hpp"
+#include "aauto/service/InputService.hpp"
+#include "aauto/service/SensorService.hpp"
 #include "aauto/utils/Logger.hpp"
 
 #include "../transport/AndroidUsbTransport.hpp"
@@ -68,12 +71,38 @@ public:
     create_services(service::SendMessageFn send_fn) override {
         std::map<int32_t, std::shared_ptr<service::IService>> services;
 
-        // Video service with the platform sink
+        // Channel 1: Video sink
+        service::VideoServiceConfig vcfg{800, 480, 30, 160};
         std::vector<std::shared_ptr<sink::IVideoSink>> video_sinks;
         video_sinks.push_back(video_sink_);
-        auto video_svc = std::make_shared<service::VideoService>(
-            send_fn, std::move(video_sinks));
-        services[1] = video_svc;  // service_id for video
+        services[1] = std::make_shared<service::VideoService>(
+            send_fn, vcfg, std::move(video_sinks));
+
+        // Channel 2: Audio sink (media)
+        std::vector<std::shared_ptr<sink::IAudioSink>> no_sinks;
+        service::AudioServiceConfig acfg_media{
+            sink::AudioStreamType::Media, 48000, 16, 2};
+        services[2] = std::make_shared<service::AudioService>(
+            send_fn, acfg_media, no_sinks);
+
+        // Channel 3: Audio sink (guidance)
+        service::AudioServiceConfig acfg_guide{
+            sink::AudioStreamType::Guidance, 16000, 16, 1};
+        services[3] = std::make_shared<service::AudioService>(
+            send_fn, acfg_guide, no_sinks);
+
+        // Channel 4: Audio sink (system)
+        service::AudioServiceConfig acfg_sys{
+            sink::AudioStreamType::System, 16000, 16, 1};
+        services[4] = std::make_shared<service::AudioService>(
+            send_fn, acfg_sys, no_sinks);
+
+        // Channel 5: Input source (touchscreen)
+        service::InputServiceConfig icfg{800, 480};
+        services[5] = std::make_shared<service::InputService>(send_fn, icfg);
+
+        // Channel 6: Sensor source (driving status + night mode)
+        services[6] = std::make_shared<service::SensorService>(send_fn);
 
         return services;
     }

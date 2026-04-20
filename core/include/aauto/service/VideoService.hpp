@@ -12,14 +12,23 @@ namespace aauto::service {
 ///
 /// Flow: SETUP -> CONFIG -> START -> [CODEC_CONFIG] -> DATA* -> STOP
 /// Flow control: phone sends max_unacked in CONFIG. HU sends ACK after N frames.
+struct VideoServiceConfig {
+    uint32_t width   = 800;
+    uint32_t height  = 480;
+    uint32_t fps     = 30;
+    uint32_t density = 160;
+};
+
 class VideoService : public ServiceBase {
 public:
     VideoService(SendMessageFn send_fn,
+                 VideoServiceConfig config,
                  std::vector<std::shared_ptr<sink::IVideoSink>> sinks);
 
     ServiceType type() const override { return ServiceType::MediaSink; }
     void on_channel_open(uint8_t channel_id) override;
     void on_channel_close() override;
+    void fill_config(aap_protobuf::service::ServiceConfiguration* config) override;
 
 private:
     void on_setup(const uint8_t* data, std::size_t size);
@@ -30,6 +39,7 @@ private:
     void on_stop(const uint8_t* data, std::size_t size);
     void send_ack();
 
+    VideoServiceConfig video_config_;
     std::vector<std::shared_ptr<sink::IVideoSink>> sinks_;
     uint32_t max_unacked_   = 1;
     uint32_t unacked_count_ = 0;

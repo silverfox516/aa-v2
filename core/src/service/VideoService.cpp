@@ -4,11 +4,20 @@
 #include "aauto/utils/Logger.hpp"
 #include "aauto/utils/ProtocolConstants.hpp"
 
+#include <aap_protobuf/service/Service.pb.h>
+#include <aap_protobuf/service/media/sink/MediaSinkService.pb.h>
+#include <aap_protobuf/service/media/shared/message/MediaCodecType.pb.h>
+#include <aap_protobuf/service/media/sink/message/VideoCodecResolutionType.pb.h>
+#include <aap_protobuf/service/media/sink/message/VideoFrameRateType.pb.h>
+#include <aap_protobuf/service/media/sink/message/VideoConfiguration.pb.h>
+
 namespace aauto::service {
 
 VideoService::VideoService(SendMessageFn send_fn,
+                           VideoServiceConfig config,
                            std::vector<std::shared_ptr<sink::IVideoSink>> sinks)
     : ServiceBase(std::move(send_fn))
+    , video_config_(config)
     , sinks_(std::move(sinks)) {
 
     using MT = MediaMessageType;
@@ -115,6 +124,21 @@ void VideoService::send_ack() {
     // TODO: build Ack protobuf with session_id
     std::vector<uint8_t> payload;  // empty for now
     send(static_cast<uint16_t>(MediaMessageType::Ack), payload);
+}
+
+void VideoService::fill_config(
+        aap_protobuf::service::ServiceConfiguration* config) {
+    namespace pb = aap_protobuf::service::media;
+
+    auto* sink = config->mutable_media_sink_service();
+    sink->set_available_type(pb::shared::message::MEDIA_CODEC_VIDEO_H264_BP);
+
+    auto* vc = sink->add_video_configs();
+    vc->set_codec_resolution(pb::sink::message::VIDEO_800x480);
+    vc->set_frame_rate(pb::sink::message::VIDEO_FPS_30);
+    vc->set_density(video_config_.density);
+    vc->set_width_margin(0);
+    vc->set_height_margin(0);
 }
 
 } // namespace aauto::service

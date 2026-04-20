@@ -17,18 +17,10 @@
 #include <aap_protobuf/service/control/message/ByeByeRequest.pb.h>
 #include <aap_protobuf/service/control/message/ByeByeReason.pb.h>
 #include <aap_protobuf/service/Service.pb.h>
-#include <aap_protobuf/service/media/sink/MediaSinkService.pb.h>
-#include <aap_protobuf/service/media/shared/message/MediaCodecType.pb.h>
-#include <aap_protobuf/service/media/sink/message/VideoCodecResolutionType.pb.h>
-#include <aap_protobuf/service/media/sink/message/VideoFrameRateType.pb.h>
-#include <aap_protobuf/service/media/sink/message/VideoConfiguration.pb.h>
-#include <aap_protobuf/service/media/sink/message/AudioStreamType.pb.h>
-#include <aap_protobuf/service/media/shared/message/AudioConfiguration.pb.h>
-#include <aap_protobuf/service/inputsource/InputSourceService.pb.h>
-#include <aap_protobuf/service/inputsource/message/TouchScreenType.pb.h>
-#include <aap_protobuf/service/sensorsource/SensorSourceService.pb.h>
-#include <aap_protobuf/service/sensorsource/message/Sensor.pb.h>
-#include <aap_protobuf/service/sensorsource/message/SensorType.pb.h>
+#include <aap_protobuf/service/control/message/AudioFocusNotification.pb.h>
+#include <aap_protobuf/service/control/message/AudioFocusStateType.pb.h>
+#include <aap_protobuf/service/control/message/NavFocusNotification.pb.h>
+#include <aap_protobuf/service/control/message/NavFocusType.pb.h>
 #include <aap_protobuf/shared/MessageStatus.pb.h>
 
 #include <chrono>
@@ -484,17 +476,11 @@ void Session::on_service_discovery_request(const std::vector<uint8_t>& payload) 
 }
 
 void Session::send_service_discovery_response() {
-    namespace pb_media = aap_protobuf::service::media::shared::message;
-    namespace pb_video = aap_protobuf::service::media::sink::message;
-    namespace pb_input = aap_protobuf::service::inputsource;
-    namespace pb_sensor = aap_protobuf::service::sensorsource::message;
-
     pb_ctrl::ServiceDiscoveryResponse resp;
     resp.set_display_name(hu_config_.display_name);
     resp.set_driver_position(pb_ctrl::DRIVER_POSITION_LEFT);
     resp.set_session_configuration(0);
 
-    // HeadUnitInfo — all fields populated
     auto* hui = resp.mutable_headunit_info();
     hui->set_make(hu_config_.hu_make);
     hui->set_model(hu_config_.hu_model);
@@ -503,7 +489,6 @@ void Session::send_service_discovery_response() {
     hui->set_head_unit_software_version(hu_config_.hu_sw_ver);
     hui->set_head_unit_software_build(hu_config_.hu_sw_ver);
 
-    // Connection/ping configuration
     auto* conn_cfg = resp.mutable_connection_configuration();
     auto* ping_cfg = conn_cfg->mutable_ping_configuration();
     ping_cfg->set_tracked_ping_count(5);
@@ -511,68 +496,12 @@ void Session::send_service_discovery_response() {
     ping_cfg->set_interval_ms(1000);
     ping_cfg->set_high_latency_threshold_ms(200);
 
-    // Channel 1: Video sink
-    auto* video_ch = resp.add_channels();
-    video_ch->set_id(1);
-    auto* video_sink = video_ch->mutable_media_sink_service();
-    video_sink->set_available_type(pb_media::MEDIA_CODEC_VIDEO_H264_BP);
-    auto* video_cfg = video_sink->add_video_configs();
-    video_cfg->set_codec_resolution(pb_video::VIDEO_800x480);
-    video_cfg->set_frame_rate(pb_video::VIDEO_FPS_30);
-    video_cfg->set_density(hu_config_.video_density);
-    video_cfg->set_width_margin(0);
-    video_cfg->set_height_margin(0);
-
-    // Channel 2: Audio sink (media)
-    auto* audio_media_ch = resp.add_channels();
-    audio_media_ch->set_id(2);
-    auto* audio_media = audio_media_ch->mutable_media_sink_service();
-    audio_media->set_available_type(pb_media::MEDIA_CODEC_AUDIO_PCM);
-    audio_media->set_audio_type(pb_video::AUDIO_STREAM_MEDIA);
-    auto* audio_media_cfg = audio_media->add_audio_configs();
-    audio_media_cfg->set_sampling_rate(hu_config_.audio_sample_rate);
-    audio_media_cfg->set_number_of_bits(hu_config_.audio_bit_depth);
-    audio_media_cfg->set_number_of_channels(hu_config_.audio_channels);
-
-    // Channel 3: Audio sink (guidance — navigation voice)
-    auto* audio_guide_ch = resp.add_channels();
-    audio_guide_ch->set_id(3);
-    auto* audio_guide = audio_guide_ch->mutable_media_sink_service();
-    audio_guide->set_available_type(pb_media::MEDIA_CODEC_AUDIO_PCM);
-    audio_guide->set_audio_type(pb_video::AUDIO_STREAM_GUIDANCE);
-    auto* audio_guide_cfg = audio_guide->add_audio_configs();
-    audio_guide_cfg->set_sampling_rate(16000);
-    audio_guide_cfg->set_number_of_bits(16);
-    audio_guide_cfg->set_number_of_channels(1);
-
-    // Channel 4: Audio sink (system)
-    auto* audio_sys_ch = resp.add_channels();
-    audio_sys_ch->set_id(4);
-    auto* audio_sys = audio_sys_ch->mutable_media_sink_service();
-    audio_sys->set_available_type(pb_media::MEDIA_CODEC_AUDIO_PCM);
-    audio_sys->set_audio_type(pb_video::AUDIO_STREAM_SYSTEM_AUDIO);
-    auto* audio_sys_cfg = audio_sys->add_audio_configs();
-    audio_sys_cfg->set_sampling_rate(16000);
-    audio_sys_cfg->set_number_of_bits(16);
-    audio_sys_cfg->set_number_of_channels(1);
-
-    // Channel 5: Input source (touchscreen)
-    auto* input_ch = resp.add_channels();
-    input_ch->set_id(5);
-    auto* input_svc = input_ch->mutable_input_source_service();
-    auto* ts = input_svc->add_touchscreen();
-    ts->set_width(hu_config_.video_width);
-    ts->set_height(hu_config_.video_height);
-    ts->set_type(pb_input::message::CAPACITIVE);
-
-    // Channel 6: Sensor source (driving status + night mode)
-    auto* sensor_ch = resp.add_channels();
-    sensor_ch->set_id(6);
-    auto* sensor_svc = sensor_ch->mutable_sensor_source_service();
-    auto* s1 = sensor_svc->add_sensors();
-    s1->set_sensor_type(pb_sensor::SENSOR_DRIVING_STATUS_DATA);
-    auto* s2 = sensor_svc->add_sensors();
-    s2->set_sensor_type(pb_sensor::SENSOR_NIGHT_MODE);
+    // Each registered service fills its own ServiceConfiguration
+    for (auto& [service_id, svc] : services_) {
+        auto* ch = resp.add_channels();
+        ch->set_id(service_id);
+        svc->fill_config(ch);
+    }
 
     send_message(kControlChannelId,
         static_cast<uint16_t>(ControlMessageType::ServiceDiscoveryResponse),
@@ -701,12 +630,24 @@ void Session::handle_control_message(uint16_t msg_type,
             transition_to(SessionState::Disconnected);
             transport_->close();
             break;
-        case ControlMessageType::AudioFocusRequest:
-            AA_LOG_D("audio focus request received");
+        case ControlMessageType::AudioFocusRequest: {
+            AA_LOG_I("audio focus request, granting GAIN");
+            pb_ctrl::AudioFocusNotification notif;
+            notif.set_focus_state(pb_ctrl::AUDIO_FOCUS_STATE_GAIN);
+            send_message(kControlChannelId,
+                static_cast<uint16_t>(ControlMessageType::AudioFocusNotification),
+                serialize(notif));
             break;
-        case ControlMessageType::NavFocusRequest:
-            AA_LOG_D("nav focus request received");
+        }
+        case ControlMessageType::NavFocusRequest: {
+            AA_LOG_I("nav focus request, granting");
+            pb_ctrl::NavFocusNotification notif;
+            notif.set_focus_type(pb_ctrl::NAV_FOCUS_PROJECTED);
+            send_message(kControlChannelId,
+                static_cast<uint16_t>(ControlMessageType::NavFocusNotification),
+                serialize(notif));
             break;
+        }
         case ControlMessageType::BatteryStatusNotification:
             AA_LOG_D("battery status received");
             break;

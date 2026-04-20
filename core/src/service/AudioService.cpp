@@ -4,13 +4,32 @@
 #include "aauto/utils/Logger.hpp"
 #include "aauto/utils/ProtocolConstants.hpp"
 
+#include <aap_protobuf/service/Service.pb.h>
+#include <aap_protobuf/service/media/sink/MediaSinkService.pb.h>
+#include <aap_protobuf/service/media/shared/message/MediaCodecType.pb.h>
+#include <aap_protobuf/service/media/shared/message/AudioConfiguration.pb.h>
+#include <aap_protobuf/service/media/sink/message/AudioStreamType.pb.h>
+
 namespace aauto::service {
 
+namespace pb_audio = aap_protobuf::service::media::sink::message;
+
+static pb_audio::AudioStreamType
+to_proto_stream_type(sink::AudioStreamType st) {
+    switch (st) {
+        case sink::AudioStreamType::Media:    return pb_audio::AUDIO_STREAM_MEDIA;
+        case sink::AudioStreamType::Guidance: return pb_audio::AUDIO_STREAM_GUIDANCE;
+        case sink::AudioStreamType::System:   return pb_audio::AUDIO_STREAM_SYSTEM_AUDIO;
+        case sink::AudioStreamType::Call:     return pb_audio::AUDIO_STREAM_TELEPHONY;
+    }
+    return pb_audio::AUDIO_STREAM_MEDIA;
+}
+
 AudioService::AudioService(SendMessageFn send_fn,
-                           sink::AudioStreamType stream_type,
+                           AudioServiceConfig config,
                            std::vector<std::shared_ptr<sink::IAudioSink>> sinks)
     : ServiceBase(std::move(send_fn))
-    , stream_type_(stream_type)
+    , audio_config_(config)
     , sinks_(std::move(sinks)) {
 
     using MT = MediaMessageType;
@@ -31,7 +50,8 @@ AudioService::AudioService(SendMessageFn send_fn,
 void AudioService::on_channel_open(uint8_t channel_id) {
     ServiceBase::on_channel_open(channel_id);
     AA_LOG_I("audio channel opened: %u, stream_type=%u",
-             channel_id, static_cast<uint32_t>(stream_type_));
+             channel_id,
+             static_cast<uint32_t>(audio_config_.stream_type));
 }
 
 void AudioService::on_channel_close() {
@@ -45,16 +65,28 @@ void AudioService::on_channel_close() {
     AA_LOG_I("audio channel closed");
 }
 
+void AudioService::fill_config(
+        aap_protobuf::service::ServiceConfiguration* config) {
+    namespace pb_media = aap_protobuf::service::media;
+
+    auto* sink = config->mutable_media_sink_service();
+    sink->set_available_type(pb_media::shared::message::MEDIA_CODEC_AUDIO_PCM);
+    sink->set_audio_type(to_proto_stream_type(audio_config_.stream_type));
+
+    auto* ac = sink->add_audio_configs();
+    ac->set_sampling_rate(audio_config_.sample_rate);
+    ac->set_number_of_bits(audio_config_.bit_depth);
+    ac->set_number_of_channels(audio_config_.channel_count);
+}
+
 void AudioService::on_setup(const uint8_t* data, std::size_t size) {
-    // TODO: parse Setup protobuf to extract codec type
     (void)data;
     (void)size;
-    current_config_.codec_type = 1;  // AUDIO_PCM default
+    current_config_.codec_type = 1;
     AA_LOG_I("audio setup received");
 }
 
 void AudioService::on_config(const uint8_t* data, std::size_t size) {
-    // TODO: parse Config protobuf for max_unacked, configuration indices
     (void)data;
     (void)size;
     max_unacked_ = 5;
@@ -62,21 +94,20 @@ void AudioService::on_config(const uint8_t* data, std::size_t size) {
 }
 
 void AudioService::on_start(const uint8_t* data, std::size_t size) {
-    // TODO: parse Start protobuf for session_id, configuration_index
     (void)data;
     (void)size;
     started_ = true;
     unacked_count_ = 0;
 
     for (auto& sink : sinks_) {
-        sink->on_configure(current_config_, stream_type_);
+        sink->on_configure(current_config_, audio_config_.stream_type);
     }
-    AA_LOG_I("audio start, stream_type=%u", static_cast<uint32_t>(stream_type_));
+    AA_LOG_I("audio start, stream_type=%u",
+             static_cast<uint32_t>(audio_config_.stream_type));
 }
 
 void AudioService::on_codec_config(const uint8_t* data, std::size_t size) {
     if (!started_) return;
-
     for (auto& sink : sinks_) {
         sink->on_codec_config(data, size);
     }
@@ -84,13 +115,10 @@ void AudioService::on_codec_config(const uint8_t* data, std::size_t size) {
 
 void AudioService::on_data(const uint8_t* data, std::size_t size) {
     if (!started_) return;
-
-    int64_t timestamp_us = 0;  // TODO: extract from data
-
+    int64_t timestamp_us = 0;
     for (auto& sink : sinks_) {
         sink->on_audio_data(data, size, timestamp_us);
     }
-
     unacked_count_++;
     if (unacked_count_ >= max_unacked_) {
         send_ack();

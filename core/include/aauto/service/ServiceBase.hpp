@@ -32,6 +32,11 @@ public:
         channel_id_ = 0;
     }
 
+    void fill_config(
+        aap_protobuf::service::ServiceConfiguration* /*config*/) override {
+        // Default: no config. Override in derived services.
+    }
+
 protected:
     void register_handler(uint16_t msg_type, MessageHandler handler) {
         handlers_[msg_type] = std::move(handler);
