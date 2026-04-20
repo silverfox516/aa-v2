@@ -1,12 +1,14 @@
 #pragma once
 
 #include "aauto/service/IService.hpp"
+#include "aauto/utils/ProtocolConstants.hpp"
 
 #include <map>
 
 namespace aauto::service {
 
 /// Optional base class with message dispatch table.
+/// Automatically handles CHANNEL_OPEN_REQUEST with SUCCESS response.
 /// Services may use this or implement IService directly.
 class ServiceBase : public IService {
 public:
@@ -22,6 +24,18 @@ public:
     void on_message(uint16_t message_type,
                     const uint8_t* payload,
                     std::size_t payload_size) override {
+        // CHANNEL_OPEN_REQUEST: auto-respond with SUCCESS
+        if (message_type ==
+                static_cast<uint16_t>(ControlMessageType::ChannelOpenRequest)) {
+            on_channel_open(channel_id_);
+            // Respond with ChannelOpenResponse(SUCCESS)
+            // Minimal protobuf: field 1 (MessageStatus), varint 0 (SUCCESS)
+            std::vector<uint8_t> resp = {0x08, 0x00};
+            send(static_cast<uint16_t>(ControlMessageType::ChannelOpenResponse),
+                 resp);
+            return;
+        }
+
         auto it = handlers_.find(message_type);
         if (it != handlers_.end()) {
             it->second(payload, payload_size);
@@ -34,7 +48,6 @@ public:
 
     void fill_config(
         aap_protobuf::service::ServiceConfiguration* /*config*/) override {
-        // Default: no config. Override in derived services.
     }
 
 protected:

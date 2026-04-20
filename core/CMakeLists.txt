@@ -27,6 +27,7 @@ add_library(aauto-core STATIC
     src/service/AudioService.cpp
     src/service/InputService.cpp
     src/service/SensorService.cpp
+    src/service/ControlService.cpp
     src/engine/Engine.cpp
     src/crypto/AapKeys.cpp
 )
