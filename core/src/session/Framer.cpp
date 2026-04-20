@@ -1,4 +1,4 @@
-#define LOG_TAG "Framer"
+#define LOG_TAG "AA.Framer"
 
 #include "aauto/session/Framer.hpp"
 #include "aauto/utils/Logger.hpp"

@@ -1,4 +1,4 @@
-#define LOG_TAG "Engine"
+#define LOG_TAG "AA.Engine"
 
 #include "aauto/engine/Engine.hpp"
 #include "aauto/utils/Logger.hpp"
@@ -25,8 +25,8 @@ Engine::~Engine() {
 
 // ===== IEngineController =====
 
-void Engine::register_callback(std::shared_ptr<IEngineCallback> cb) {
-    callback_ = std::move(cb);
+void Engine::register_callback(IEngineCallback* cb) {
+    callback_ = cb;
 }
 
 uint32_t Engine::start_session(const std::string& transport_descriptor) {

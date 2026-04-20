@@ -1,4 +1,4 @@
-#define LOG_TAG "Session"
+#define LOG_TAG "AA.Session"
 
 #include "aauto/session/Session.hpp"
 #include "aauto/engine/Engine.hpp"

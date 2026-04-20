@@ -26,6 +26,14 @@ cc_defaults {
     ],
 }
 
+// Core headers only (for modules that need interfaces without asio/RTTI)
+cc_library_headers {
+    name: "libaauto-core-headers",
+    export_include_dirs: [
+        "include",
+    ],
+}
+
 // Core static library
 cc_library_static {
     name: "libaauto-core",

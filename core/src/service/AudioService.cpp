@@ -1,4 +1,4 @@
-#define LOG_TAG "AudioService"
+#define LOG_TAG "AA.AudioService"
 
 #include "aauto/service/AudioService.hpp"
 #include "aauto/utils/Logger.hpp"

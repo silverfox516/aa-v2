@@ -1,4 +1,4 @@
-#define LOG_TAG "VideoSink"
+#define LOG_TAG "AA.VideoSink"
 
 #include "AMediaCodecVideoSink.hpp"
 #include "aauto/utils/Logger.hpp"

@@ -2,6 +2,8 @@
 // F.2: Android.bp (Soong) for AOSP tree integration
 
 subdirs = [
+    "aidl",
+    "app/android",
     "core",
     "impl",
     "protobuf",

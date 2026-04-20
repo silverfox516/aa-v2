@@ -1,0 +1,5 @@
+service aa-engine /system/bin/aa-engine
+    class main
+    user system
+    group system inet usb
+    disabled

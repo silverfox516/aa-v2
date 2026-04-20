@@ -1,4 +1,4 @@
-#define LOG_TAG "VideoService"
+#define LOG_TAG "AA.VideoService"
 
 #include "aauto/service/VideoService.hpp"
 #include "aauto/utils/Logger.hpp"

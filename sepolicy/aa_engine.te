@@ -1,0 +1,25 @@
+# SELinux policy for aa-engine daemon
+# Development phase: permissive. Collect denials with audit2allow,
+# then convert to enforcing with precise rules before production.
+
+type aa_engine, domain;
+permissive aa_engine;
+type aa_engine_exec, exec_type, file_type, system_file_type;
+
+# Domain transition from init
+init_daemon_domain(aa_engine)
+
+# Binder access (register service, receive calls from app)
+binder_use(aa_engine)
+binder_call(aa_engine, system_server)
+binder_call(aa_engine, system_app)
+add_service(aa_engine, aa_engine_service)
+
+# USB device access
+allow aa_engine usb_device:chr_file { open read write ioctl };
+
+# OpenSSL / crypto
+allow aa_engine self:capability { net_raw };
+
+# Logging
+allow aa_engine log_device:chr_file { open write };

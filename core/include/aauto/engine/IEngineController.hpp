@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <string>
 #include <system_error>
 
@@ -47,7 +46,8 @@ class IEngineController {
 public:
     virtual ~IEngineController() = default;
 
-    virtual void register_callback(std::shared_ptr<IEngineCallback> cb) = 0;
+    /// Register callback. Caller must ensure cb outlives the engine.
+    virtual void register_callback(IEngineCallback* cb) = 0;
 
     /// Create session for transport descriptor.
     /// Returns session_id. Connection proceeds asynchronously.

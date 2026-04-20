@@ -1,0 +1,18 @@
+// Android Auto app (system app)
+
+android_app {
+    name: "AndroidAuto",
+    srcs: [
+        "src/**/*.java",
+    ],
+    resource_dirs: [
+        "res",
+    ],
+    manifest: "AndroidManifest.xml",
+    platform_apis: true,
+    privileged: true,
+    certificate: "platform",
+    static_libs: [
+        "aauto-aidl-java",
+    ],
+}

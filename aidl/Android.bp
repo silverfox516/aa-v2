@@ -1,0 +1,30 @@
+// AIDL interface for aa-engine <-> app communication
+
+java_library {
+    name: "aauto-aidl-java",
+    srcs: [
+        "com/aauto/engine/IAAEngine.aidl",
+        "com/aauto/engine/IAAEngineCallback.aidl",
+    ],
+    sdk_version: "system_current",
+}
+
+cc_library_shared {
+    name: "libaauto-aidl",
+    aidl: {
+        local_include_dirs: ["."],
+        export_aidl_headers: true,
+    },
+    srcs: [
+        "com/aauto/engine/IAAEngine.aidl",
+        "com/aauto/engine/IAAEngineCallback.aidl",
+    ],
+    shared_libs: [
+        "libbinder",
+        "libutils",
+    ],
+    export_include_dirs: ["."],
+    export_shared_lib_headers: [
+        "libbinder",
+    ],
+}

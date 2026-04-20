@@ -1,4 +1,4 @@
-#define LOG_TAG "OpenSslCrypto"
+#define LOG_TAG "AA.OpenSslCrypto"
 
 #include "OpenSslCryptoStrategy.hpp"
 #include "aauto/crypto/AapKeys.hpp"
@@ -21,12 +21,16 @@ OpenSslCryptoStrategy::OpenSslCryptoStrategy(const crypto::CryptoConfig& config)
 OpenSslCryptoStrategy::~OpenSslCryptoStrategy() = default;
 
 bool OpenSslCryptoStrategy::init_ssl_context(const crypto::CryptoConfig& config) {
-    const SSL_METHOD* method = SSLv23_server_method();
+    const SSL_METHOD* method = SSLv23_client_method();
     ctx_.reset(SSL_CTX_new(method));
     if (!ctx_) {
         AA_LOG_E("SSL_CTX_new failed");
         return false;
     }
+
+    // Lock to TLS 1.2 as required by AAP specification
+    SSL_CTX_set_min_proto_version(ctx_.get(), TLS1_2_VERSION);
+    SSL_CTX_set_max_proto_version(ctx_.get(), TLS1_2_VERSION);
 
     // Disable certificate verification (AAP uses custom cert exchange)
     SSL_CTX_set_verify(ctx_.get(), SSL_VERIFY_NONE, nullptr);
@@ -101,8 +105,8 @@ void OpenSslCryptoStrategy::init_ssl() {
     // SSL takes ownership of the BIOs
     SSL_set_bio(ssl_.get(), read_bio_, write_bio_);
 
-    // HU acts as TLS server
-    SSL_set_accept_state(ssl_.get());
+    // HU acts as TLS client (sends ClientHello first)
+    SSL_set_connect_state(ssl_.get());
 
     established_ = false;
 }

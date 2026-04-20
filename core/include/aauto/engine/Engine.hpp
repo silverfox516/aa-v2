@@ -76,7 +76,7 @@ public:
     ~Engine();
 
     // IEngineController
-    void register_callback(std::shared_ptr<IEngineCallback> cb) override;
+    void register_callback(IEngineCallback* cb) override;
     uint32_t start_session(const std::string& transport_descriptor) override;
     void stop_session(uint32_t session_id) override;
     void stop_all() override;
@@ -106,7 +106,7 @@ private:
     std::shared_ptr<ITransportFactory> transport_factory_;
     std::shared_ptr<ICryptoFactory>    crypto_factory_;
     std::shared_ptr<IServiceFactory>   service_factory_;
-    std::shared_ptr<IEngineCallback>   callback_;
+    IEngineCallback*                   callback_ = nullptr;
 
     std::map<uint32_t, std::shared_ptr<session::Session>> sessions_;
     uint32_t active_session_id_ = 0;
