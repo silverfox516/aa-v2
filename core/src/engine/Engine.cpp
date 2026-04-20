@@ -1,6 +1,7 @@
 #define LOG_TAG "AA.Engine"
 
 #include "aauto/engine/Engine.hpp"
+#include "aauto/service/ControlService.hpp"
 #include "aauto/utils/Logger.hpp"
 
 namespace aauto::engine {
@@ -114,12 +115,10 @@ void Engine::on_session_state_changed(uint32_t session_id,
         SessionStatus status;
         switch (state) {
             case session::SessionState::Idle:
-            case session::SessionState::SslHandshake:
                 status = SessionStatus::Connecting;
                 break;
             case session::SessionState::VersionExchange:
-            case session::SessionState::ServiceDiscovery:
-            case session::SessionState::ChannelSetup:
+            case session::SessionState::SslHandshake:
                 status = SessionStatus::Handshaking;
                 break;
             case session::SessionState::Running:
@@ -169,18 +168,40 @@ void Engine::do_start_session(const std::string& descriptor, uint32_t sid) {
     sconfig.session_id = sid;
 
     auto session = std::make_shared<session::Session>(
-        io_context_.get_executor(), sconfig, config_,
+        io_context_.get_executor(), sconfig,
         std::move(transport), std::move(crypto), this);
 
-    // Register services before starting the session
+    // Create send function bound to this session
     auto send_fn = [weak = std::weak_ptr<session::Session>(session)](
             uint8_t ch, uint16_t type, const std::vector<uint8_t>& payload) {
         if (auto s = weak.lock()) {
             s->send_message(ch, type, payload);
         }
     };
-    auto services = service_factory_->create_services(send_fn);
-    for (auto& [service_id, svc] : services) {
+
+    // Create peer services (ch 1~6: video, audio, input, sensor, etc.)
+    auto peer_services = service_factory_->create_services(send_fn);
+
+    // Assign channel IDs to peer services before creating ControlService
+    // (ControlService iterates peer_services to build ServiceDiscoveryResponse)
+    for (auto& [service_id, svc] : peer_services) {
+        svc->set_channel(static_cast<uint8_t>(service_id));
+    }
+
+    // Create ControlService (ch 0) with references to peer services
+    auto control_svc = std::make_shared<service::ControlService>(
+        send_fn, config_, peer_services);
+    control_svc->set_channel(kControlChannelId);
+    control_svc->set_session_close_callback(
+        [weak = std::weak_ptr<session::Session>(session)] {
+            if (auto s = weak.lock()) {
+                s->stop();
+            }
+        });
+    session->register_service(kControlChannelId, control_svc);
+
+    // Register peer services
+    for (auto& [service_id, svc] : peer_services) {
         session->register_service(static_cast<uint8_t>(service_id), std::move(svc));
     }
 

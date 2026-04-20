@@ -5,6 +5,7 @@
 #include "aauto/service/AudioService.hpp"
 #include "aauto/service/InputService.hpp"
 #include "aauto/service/SensorService.hpp"
+#include "aauto/service/MicrophoneService.hpp"
 #include "aauto/utils/Logger.hpp"
 
 #include "../transport/AndroidUsbTransport.hpp"
@@ -103,6 +104,9 @@ public:
 
         // Channel 6: Sensor source (driving status + night mode)
         services[6] = std::make_shared<service::SensorService>(send_fn);
+
+        // Channel 7: Microphone source (stub — required by some phones)
+        services[7] = std::make_shared<service::MicrophoneService>(send_fn);
 
         return services;
     }

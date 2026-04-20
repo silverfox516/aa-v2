@@ -40,7 +40,10 @@ public:
         session_close_cb_ = std::move(cb);
     }
 
+    void on_session_stop() override;
+
 private:
+    void initiate_bye();
     void send_service_discovery_response();
     void send_ping();
     void heartbeat_loop();

@@ -17,7 +17,9 @@
 #include <aap_protobuf/service/control/message/NavFocusNotification.pb.h>
 #include <aap_protobuf/service/control/message/NavFocusType.pb.h>
 #include <aap_protobuf/service/control/message/ByeByeRequest.pb.h>
+#include <aap_protobuf/service/control/message/ByeByeReason.pb.h>
 #include <aap_protobuf/service/control/message/ByeByeResponse.pb.h>
+#include <aap_protobuf/service/control/message/AudioFocusRequest.pb.h>
 #include <aap_protobuf/service/control/message/AuthResponse.pb.h>
 #include <aap_protobuf/service/Service.pb.h>
 #include <aap_protobuf/shared/MessageStatus.pb.h>
@@ -53,20 +55,47 @@ ControlService::ControlService(
         [this](const uint8_t* data, std::size_t size) {
             pb_ctrl::ServiceDiscoveryRequest req;
             if (req.ParseFromArray(data, static_cast<int>(size))) {
-                if (req.has_device_name()) {
-                    AA_LOG_I("phone: %s", req.device_name().c_str());
-                }
+                AA_LOG_I("ServiceDiscoveryRequest (%zu bytes): "
+                         "device=%s label=%s has_phone_info=%d",
+                         size,
+                         req.has_device_name() ? req.device_name().c_str() : "(none)",
+                         req.has_label_text() ? req.label_text().c_str() : "(none)",
+                         req.has_phone_info());
             }
-            AA_LOG_I("received ServiceDiscoveryRequest");
             send_service_discovery_response();
         });
 
     // AUDIO_FOCUS_REQUEST
     register_handler(static_cast<uint16_t>(CT::AudioFocusRequest),
-        [this](const uint8_t*, std::size_t) {
-            AA_LOG_I("audio focus request, granting GAIN");
+        [this](const uint8_t* data, std::size_t size) {
+            pb_ctrl::AudioFocusRequest req;
+            if (!req.ParseFromArray(data, static_cast<int>(size))) {
+                AA_LOG_W("failed to parse AudioFocusRequest");
+                return;
+            }
+            auto request_type = req.audio_focus_type();
+            pb_ctrl::AudioFocusStateType state;
+            switch (request_type) {
+                case pb_ctrl::AUDIO_FOCUS_GAIN:
+                    state = pb_ctrl::AUDIO_FOCUS_STATE_GAIN;
+                    break;
+                case pb_ctrl::AUDIO_FOCUS_GAIN_TRANSIENT:
+                    state = pb_ctrl::AUDIO_FOCUS_STATE_GAIN_TRANSIENT;
+                    break;
+                case pb_ctrl::AUDIO_FOCUS_GAIN_TRANSIENT_MAY_DUCK:
+                    state = pb_ctrl::AUDIO_FOCUS_STATE_GAIN_TRANSIENT_GUIDANCE_ONLY;
+                    break;
+                case pb_ctrl::AUDIO_FOCUS_RELEASE:
+                    state = pb_ctrl::AUDIO_FOCUS_STATE_LOSS;
+                    break;
+                default:
+                    state = pb_ctrl::AUDIO_FOCUS_STATE_GAIN;
+                    break;
+            }
+            AA_LOG_I("audio focus: request=%d -> response=%d",
+                     request_type, state);
             pb_ctrl::AudioFocusNotification notif;
-            notif.set_focus_state(pb_ctrl::AUDIO_FOCUS_STATE_GAIN);
+            notif.set_focus_state(state);
             notif.set_unsolicited(false);
             send(static_cast<uint16_t>(CT::AudioFocusNotification),
                  serialize(notif));
@@ -211,6 +240,17 @@ void ControlService::heartbeat_loop() {
     }
 
     AA_LOG_D("heartbeat thread exited");
+}
+
+void ControlService::on_session_stop() {
+    initiate_bye();
+}
+
+void ControlService::initiate_bye() {
+    AA_LOG_I("initiating ByeBye");
+    pb_ctrl::ByeByeRequest bye;
+    bye.set_reason(pb_ctrl::USER_SELECTION);
+    send(static_cast<uint16_t>(ControlMessageType::ByeByeRequest), serialize(bye));
 }
 
 void ControlService::trigger_session_close(const char* reason) {

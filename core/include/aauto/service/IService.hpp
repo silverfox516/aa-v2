@@ -39,6 +39,12 @@ class IService {
 public:
     virtual ~IService() = default;
 
+    /// Assign this service's channel number. Called by Engine before session start.
+    virtual void set_channel(uint8_t channel_id) = 0;
+
+    /// Return this service's assigned channel number.
+    virtual uint8_t channel_id() const = 0;
+
     virtual void on_channel_open(uint8_t channel_id) = 0;
 
     /// message_type: 2-byte type ID. payload: body after type stripped.
@@ -47,6 +53,10 @@ public:
                             std::size_t payload_size) = 0;
 
     virtual void on_channel_close() = 0;
+
+    /// Called when the session is stopping gracefully.
+    /// Services may perform cleanup (e.g., ControlService sends ByeBye).
+    virtual void on_session_stop() {}
 
     virtual ServiceType type() const = 0;
 

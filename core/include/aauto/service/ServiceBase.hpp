@@ -2,6 +2,7 @@
 
 #include "aauto/service/IService.hpp"
 #include "aauto/utils/ProtocolConstants.hpp"
+#include "aauto/utils/Logger.hpp"
 
 #include <map>
 
@@ -17,6 +18,9 @@ public:
     explicit ServiceBase(SendMessageFn send_fn)
         : send_fn_(std::move(send_fn)) {}
 
+    void set_channel(uint8_t channel_id) override { channel_id_ = channel_id; }
+    uint8_t channel_id() const override { return channel_id_; }
+
     void on_channel_open(uint8_t channel_id) override {
         channel_id_ = channel_id;
     }
@@ -27,6 +31,8 @@ public:
         // CHANNEL_OPEN_REQUEST: auto-respond with SUCCESS
         if (message_type ==
                 static_cast<uint16_t>(ControlMessageType::ChannelOpenRequest)) {
+            AA_LOG_I("ch %u: ChannelOpenRequest received, responding SUCCESS",
+                     channel_id_);
             on_channel_open(channel_id_);
             // Respond with ChannelOpenResponse(SUCCESS)
             // Minimal protobuf: field 1 (MessageStatus), varint 0 (SUCCESS)
@@ -39,6 +45,9 @@ public:
         auto it = handlers_.find(message_type);
         if (it != handlers_.end()) {
             it->second(payload, payload_size);
+        } else {
+            AA_LOG_W("ch %u: unhandled message type %u (%zu bytes)",
+                     channel_id_, message_type, payload_size);
         }
     }
 

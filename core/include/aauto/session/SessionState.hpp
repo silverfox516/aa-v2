@@ -8,19 +8,14 @@ enum class SessionState : uint8_t {
     /// Transport assigned but not yet open.
     Idle,
 
-    /// VERSION_REQUEST sent, awaiting VERSION_RESPONSE + AUTH_COMPLETE.
+    /// VERSION_REQUEST sent, awaiting VERSION_RESPONSE.
     VersionExchange,
 
-    /// SSL/TLS handshake in progress (after AUTH_COMPLETE).
+    /// SSL/TLS handshake in progress (after VERSION exchange).
     SslHandshake,
 
-    /// SERVICE_DISCOVERY_REQUEST sent, awaiting response.
-    ServiceDiscovery,
-
-    /// Opening channels for discovered services.
-    ChannelSetup,
-
-    /// Fully operational. Media, input, sensor, ping active.
+    /// Fully operational. All messages delegated to services.
+    /// ControlService handles ServiceDiscovery, ChannelOpen, Ping, etc.
     Running,
 
     /// Graceful shutdown. BYEBYE exchange in progress.
@@ -42,8 +37,6 @@ inline const char* to_string(SessionState s) {
         case SessionState::Idle:             return "Idle";
         case SessionState::VersionExchange:  return "VersionExchange";
         case SessionState::SslHandshake:     return "SslHandshake";
-        case SessionState::ServiceDiscovery: return "ServiceDiscovery";
-        case SessionState::ChannelSetup:     return "ChannelSetup";
         case SessionState::Running:          return "Running";
         case SessionState::Disconnecting:    return "Disconnecting";
         case SessionState::Disconnected:     return "Disconnected";

@@ -72,7 +72,6 @@ void AudioService::fill_config(
     auto* sink = config->mutable_media_sink_service();
     sink->set_available_type(pb_media::shared::message::MEDIA_CODEC_AUDIO_PCM);
     sink->set_audio_type(to_proto_stream_type(audio_config_.stream_type));
-
     auto* ac = sink->add_audio_configs();
     ac->set_sampling_rate(audio_config_.sample_rate);
     ac->set_number_of_bits(audio_config_.bit_depth);

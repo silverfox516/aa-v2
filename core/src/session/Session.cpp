@@ -1,36 +1,15 @@
 #define LOG_TAG "AA.Session"
 
 #include "aauto/session/Session.hpp"
-#include "aauto/engine/Engine.hpp"
 #include "aauto/utils/Logger.hpp"
 
-#include <aap_protobuf/service/control/message/VersionRequestOptions.pb.h>
-#include <aap_protobuf/service/control/message/VersionResponseOptions.pb.h>
 #include <aap_protobuf/service/control/message/AuthResponse.pb.h>
-#include <aap_protobuf/service/control/message/ServiceDiscoveryRequest.pb.h>
-#include <aap_protobuf/service/control/message/ServiceDiscoveryResponse.pb.h>
-#include <aap_protobuf/service/control/message/ChannelOpenRequest.pb.h>
-#include <aap_protobuf/service/control/message/ChannelOpenResponse.pb.h>
-#include <aap_protobuf/service/control/message/HeadUnitInfo.pb.h>
-#include <aap_protobuf/service/control/message/PingRequest.pb.h>
-#include <aap_protobuf/service/control/message/PingResponse.pb.h>
-#include <aap_protobuf/service/control/message/ByeByeRequest.pb.h>
-#include <aap_protobuf/service/control/message/ByeByeReason.pb.h>
-#include <aap_protobuf/service/Service.pb.h>
-#include <aap_protobuf/service/control/message/AudioFocusNotification.pb.h>
-#include <aap_protobuf/service/control/message/AudioFocusStateType.pb.h>
-#include <aap_protobuf/service/control/message/NavFocusNotification.pb.h>
-#include <aap_protobuf/service/control/message/NavFocusType.pb.h>
-#include <aap_protobuf/shared/MessageStatus.pb.h>
 
 #include <chrono>
 
 namespace aauto::session {
 
 namespace pb_ctrl = aap_protobuf::service::control::message;
-namespace pb_ver  = aap_protobuf::channel::control::version;
-namespace pb_svc  = aap_protobuf::service;
-namespace pb_shared = aap_protobuf::shared;
 
 // Helper: serialize protobuf to byte vector
 static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
@@ -41,19 +20,15 @@ static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) 
 
 Session::Session(asio::any_io_executor executor,
                  SessionConfig config,
-                 const engine::HeadunitConfig& hu_config,
                  std::shared_ptr<transport::ITransport> transport,
                  std::shared_ptr<crypto::ICryptoStrategy> crypto,
                  ISessionObserver* observer)
     : strand_(asio::make_strand(executor))
     , config_(config)
-    , hu_config_(hu_config)
     , transport_(std::move(transport))
     , crypto_(std::move(crypto))
     , observer_(observer)
-    , state_timer_(strand_)
-    , ping_timer_(strand_)
-    , ping_timeout_timer_(strand_) {
+    , state_timer_(strand_) {
     read_buffer_.fill(0);
 }
 
@@ -81,11 +56,9 @@ void Session::stop() {
             self->transition_to(SessionState::Disconnecting);
             self->start_state_timer(self->config_.byebye_timeout_ms);
 
-            pb_ctrl::ByeByeRequest bye;
-            bye.set_reason(pb_ctrl::USER_SELECTION);
-            self->send_message(kControlChannelId,
-                static_cast<uint16_t>(ControlMessageType::ByeByeRequest),
-                serialize(bye));
+            for (auto& [ch, svc] : self->services_) {
+                svc->on_session_stop();
+            }
         } else {
             self->handle_error(make_error_code(AapErrc::SessionTerminated));
         }
@@ -255,11 +228,28 @@ void Session::dispatch_frame(AapFrame frame) {
 
 void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
                                  std::vector<uint8_t> payload) {
-    if (channel_id == kControlChannelId) {
-        handle_control_message(msg_type, payload);
-        return;
+    AA_LOG_D("rx: ch=%u type=%u size=%zu state=%s",
+             channel_id, msg_type, payload.size(), to_string(state_));
+
+    // During handshake, Session handles VERSION and SSL messages directly.
+    // After handshake (Running), ALL messages go to registered services.
+    if (state_ == SessionState::VersionExchange ||
+        state_ == SessionState::SslHandshake) {
+        auto ct = static_cast<ControlMessageType>(msg_type);
+        switch (ct) {
+            case ControlMessageType::VersionResponse:
+                on_version_response(payload);
+                return;
+            case ControlMessageType::EncapsulatedSsl:
+                on_ssl_data_received(payload.data(), payload.size());
+                return;
+            default:
+                AA_LOG_W("unexpected message type %u during handshake", msg_type);
+                return;
+        }
     }
 
+    // Post-handshake: delegate to services (including ch 0 = ControlService)
     auto it = services_.find(channel_id);
     if (it != services_.end()) {
         it->second->on_message(msg_type, payload.data(), payload.size());
@@ -288,8 +278,6 @@ void Session::handle_error(const std::error_code& ec) {
     transition_to(SessionState::Error);
 
     state_timer_.cancel();
-    ping_timer_.cancel();
-    ping_timeout_timer_.cancel();
     transport_->close();
 
     for (auto& [ch_id, svc] : services_) {
@@ -316,25 +304,11 @@ void Session::on_state_timeout() {
              to_string(state_));
 
     switch (state_) {
-        case SessionState::SslHandshake:
-            handle_error(make_error_code(AapErrc::SslHandshakeFailed));
-            break;
         case SessionState::VersionExchange:
             handle_error(make_error_code(AapErrc::VersionMismatch));
             break;
-        case SessionState::ServiceDiscovery:
-            handle_error(make_error_code(AapErrc::ServiceDiscoveryFailed));
-            break;
-        case SessionState::ChannelSetup:
-            // Timeout in ChannelSetup = no more channel opens coming
-            // If we received at least one, transition to Running
-            if (!service_id_to_channel_.empty()) {
-                AA_LOG_I("channel setup complete, transitioning to Running");
-                transition_to(SessionState::Running);
-                start_ping_timer();
-            } else {
-                handle_error(make_error_code(AapErrc::ChannelOpenFailed));
-            }
+        case SessionState::SslHandshake:
+            handle_error(make_error_code(AapErrc::SslHandshakeFailed));
             break;
         case SessionState::Disconnecting:
             transition_to(SessionState::Disconnected);
@@ -346,7 +320,7 @@ void Session::on_state_timeout() {
 }
 
 // ===== Handshake sequence =====
-// AAP protocol order: VERSION → SSL → AUTH → SERVICE_DISCOVERY → CHANNEL_OPEN
+// AAP protocol order: VERSION → SSL → AUTH → (Running: services take over)
 
 void Session::begin_version_exchange() {
     transition_to(SessionState::VersionExchange);
@@ -358,7 +332,9 @@ void Session::begin_version_exchange() {
 void Session::send_version_request() {
     // VERSION_REQUEST payload is raw bytes, not protobuf:
     // [major:2 BE][minor:2 BE]
-    std::vector<uint8_t> payload = {0, 1, 0, 1};  // AAP v1.1
+    // VERSION_REQUEST payload: [major:2 BE][minor:2 BE]
+    // Use v1.1 — matches reference headunit. Phone responds with its version.
+    std::vector<uint8_t> payload = {0, 1, 0, 1};
     send_message(kControlChannelId,
         static_cast<uint16_t>(ControlMessageType::VersionRequest),
         payload);
@@ -384,12 +360,6 @@ void Session::on_version_response(const std::vector<uint8_t>& payload) {
     // Version OK → start SSL handshake
     AA_LOG_I("version exchange complete, starting SSL handshake");
     begin_ssl_handshake();
-}
-
-void Session::on_auth_complete(const std::vector<uint8_t>& /*payload*/) {
-    // Not expected from phone in this protocol flow.
-    // HU sends AUTH_COMPLETE after SSL, not the phone.
-    AA_LOG_W("unexpected AUTH_COMPLETE from phone, ignoring");
 }
 
 void Session::begin_ssl_handshake() {
@@ -439,7 +409,6 @@ void Session::on_ssl_complete() {
     AA_LOG_I("SSL handshake complete, sending AUTH_COMPLETE (plaintext)");
 
     // AUTH_COMPLETE must be sent UNENCRYPTED — it's the last plaintext message.
-    // Temporarily mark crypto as not established to bypass encryption.
     // After this message, all subsequent messages will be encrypted.
     pb_ctrl::AuthResponse auth;
     auth.set_status(0);
@@ -458,203 +427,10 @@ void Session::on_ssl_complete() {
         enqueue_write(std::move(wire));
     }
 
-    // Wait for phone's ServiceDiscoveryRequest
-    transition_to(SessionState::ServiceDiscovery);
-    start_state_timer(config_.service_discovery_timeout_ms);
-    AA_LOG_I("waiting for ServiceDiscoveryRequest from phone");
-}
-
-void Session::on_service_discovery_request(const std::vector<uint8_t>& payload) {
-    pb_ctrl::ServiceDiscoveryRequest req;
-    if (req.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
-        if (req.has_device_name()) {
-            AA_LOG_I("phone device: %s", req.device_name().c_str());
-        }
-    }
-    AA_LOG_I("received ServiceDiscoveryRequest, sending response");
-    send_service_discovery_response();
-}
-
-void Session::send_service_discovery_response() {
-    pb_ctrl::ServiceDiscoveryResponse resp;
-    resp.set_display_name(hu_config_.display_name);
-    resp.set_driver_position(pb_ctrl::DRIVER_POSITION_LEFT);
-    resp.set_session_configuration(0);
-
-    auto* hui = resp.mutable_headunit_info();
-    hui->set_make(hu_config_.hu_make);
-    hui->set_model(hu_config_.hu_model);
-    hui->set_head_unit_make(hu_config_.hu_make);
-    hui->set_head_unit_model(hu_config_.hu_model);
-    hui->set_head_unit_software_version(hu_config_.hu_sw_ver);
-    hui->set_head_unit_software_build(hu_config_.hu_sw_ver);
-
-    auto* conn_cfg = resp.mutable_connection_configuration();
-    auto* ping_cfg = conn_cfg->mutable_ping_configuration();
-    ping_cfg->set_tracked_ping_count(5);
-    ping_cfg->set_timeout_ms(3000);
-    ping_cfg->set_interval_ms(1000);
-    ping_cfg->set_high_latency_threshold_ms(200);
-
-    // Each registered service fills its own ServiceConfiguration
-    for (auto& [service_id, svc] : services_) {
-        auto* ch = resp.add_channels();
-        ch->set_id(service_id);
-        svc->fill_config(ch);
-    }
-
-    send_message(kControlChannelId,
-        static_cast<uint16_t>(ControlMessageType::ServiceDiscoveryResponse),
-        serialize(resp));
-    AA_LOG_I("sent ServiceDiscoveryResponse (%d channels)", resp.channels_size());
-
-    // Now wait for ChannelOpenRequests from phone
-    transition_to(SessionState::ChannelSetup);
-    start_state_timer(config_.channel_setup_timeout_ms);
-}
-
-void Session::on_channel_open_request(const std::vector<uint8_t>& payload) {
-    pb_ctrl::ChannelOpenRequest req;
-    if (!req.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
-        AA_LOG_W("failed to parse ChannelOpenRequest");
-        return;
-    }
-
-    int32_t service_id = req.service_id();
-    uint8_t ch = next_channel_id_++;
-    service_id_to_channel_[service_id] = ch;
-
-    AA_LOG_I("ChannelOpenRequest: service_id=%d -> channel=%u", service_id, ch);
-
-    // Respond with success
-    pb_ctrl::ChannelOpenResponse resp;
-    resp.set_status(pb_shared::STATUS_SUCCESS);
-    send_message(kControlChannelId,
-        static_cast<uint16_t>(ControlMessageType::ChannelOpenResponse),
-        serialize(resp));
-
-    // Reset channel setup timer on each request (phone may send multiple)
-    start_state_timer(config_.channel_setup_timeout_ms);
-}
-
-// ===== Ping =====
-
-void Session::start_ping_timer() {
-    ping_timer_.expires_after(
-        std::chrono::milliseconds(config_.ping_interval_ms));
-    auto self = shared_from_this();
-    ping_timer_.async_wait([self](const std::error_code& ec) {
-        if (!ec) {
-            self->send_ping();
-        }
-    });
-}
-
-void Session::send_ping() {
-    if (state_ != SessionState::Running) return;
-
-    auto now = std::chrono::steady_clock::now().time_since_epoch();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-
-    pb_ctrl::PingRequest ping;
-    ping.set_timestamp(ms);
-
-    send_message(kControlChannelId,
-        static_cast<uint16_t>(ControlMessageType::PingRequest),
-        serialize(ping));
-
-    // Start ping timeout
-    ping_timeout_timer_.expires_after(
-        std::chrono::milliseconds(config_.ping_timeout_ms));
-    auto self = shared_from_this();
-    ping_timeout_timer_.async_wait([self](const std::error_code& ec) {
-        if (!ec) {
-            self->on_ping_timeout();
-        }
-    });
-}
-
-void Session::on_ping_response(const std::vector<uint8_t>& /*payload*/) {
-    ping_timeout_timer_.cancel();
-    start_ping_timer();
-}
-
-void Session::on_ping_timeout() {
-    AA_LOG_E("ping timeout");
-    handle_error(make_error_code(AapErrc::PingTimeout));
-}
-
-// ===== Control message dispatch =====
-
-void Session::handle_control_message(uint16_t msg_type,
-                                     const std::vector<uint8_t>& payload) {
-    auto ct = static_cast<ControlMessageType>(msg_type);
-
-    switch (ct) {
-        case ControlMessageType::EncapsulatedSsl:
-            on_ssl_data_received(payload.data(), payload.size());
-            break;
-        case ControlMessageType::VersionResponse:
-            on_version_response(payload);
-            break;
-        case ControlMessageType::AuthComplete:
-            on_auth_complete(payload);
-            break;
-        case ControlMessageType::ServiceDiscoveryRequest:
-            on_service_discovery_request(payload);
-            break;
-        case ControlMessageType::ChannelOpenRequest:
-            on_channel_open_request(payload);
-            break;
-        case ControlMessageType::PingRequest: {
-            // Respond with same payload (echo timestamp)
-            send_message(kControlChannelId,
-                static_cast<uint16_t>(ControlMessageType::PingResponse),
-                payload);
-            break;
-        }
-        case ControlMessageType::PingResponse:
-            on_ping_response(payload);
-            break;
-        case ControlMessageType::ByeByeRequest: {
-            AA_LOG_I("received ByeByeRequest");
-            send_message(kControlChannelId,
-                static_cast<uint16_t>(ControlMessageType::ByeByeResponse),
-                {});
-            transition_to(SessionState::Disconnecting);
-            start_state_timer(config_.byebye_timeout_ms);
-            break;
-        }
-        case ControlMessageType::ByeByeResponse:
-            AA_LOG_I("received ByeByeResponse");
-            transition_to(SessionState::Disconnected);
-            transport_->close();
-            break;
-        case ControlMessageType::AudioFocusRequest: {
-            AA_LOG_I("audio focus request, granting GAIN");
-            pb_ctrl::AudioFocusNotification notif;
-            notif.set_focus_state(pb_ctrl::AUDIO_FOCUS_STATE_GAIN);
-            send_message(kControlChannelId,
-                static_cast<uint16_t>(ControlMessageType::AudioFocusNotification),
-                serialize(notif));
-            break;
-        }
-        case ControlMessageType::NavFocusRequest: {
-            AA_LOG_I("nav focus request, granting");
-            pb_ctrl::NavFocusNotification notif;
-            notif.set_focus_type(pb_ctrl::NAV_FOCUS_PROJECTED);
-            send_message(kControlChannelId,
-                static_cast<uint16_t>(ControlMessageType::NavFocusNotification),
-                serialize(notif));
-            break;
-        }
-        case ControlMessageType::BatteryStatusNotification:
-            AA_LOG_D("battery status received");
-            break;
-        default:
-            AA_LOG_D("unhandled control message type %u", msg_type);
-            break;
-    }
+    // Handshake complete — transition to Running.
+    // ControlService will handle ServiceDiscovery, ChannelOpen, Ping, etc.
+    transition_to(SessionState::Running);
+    AA_LOG_I("session running, all messages delegated to services");
 }
 
 } // namespace aauto::session
