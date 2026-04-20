@@ -72,7 +72,8 @@ ControlService::ControlService(
                 auto pos = phone_name.find(' ');
                 std::string short_name = (pos != std::string::npos)
                     ? phone_name.substr(pos + 1) : phone_name;
-                set_session_tag(session_tag_ + ":" + short_name);
+                session_tag_ += ":" + short_name;
+                aauto::set_session_tag(session_tag_);
             }
             send_service_discovery_response();
         });
@@ -196,7 +197,7 @@ void ControlService::on_channel_open(uint8_t channel_id) {
     close_triggered_ = false;
     running_ = true;
     heartbeat_thread_ = std::thread([this] {
-        set_session_tag(session_tag_);
+        aauto::set_session_tag(session_tag_);
         heartbeat_loop();
     });
 }

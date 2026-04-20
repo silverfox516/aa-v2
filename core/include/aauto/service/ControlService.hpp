@@ -40,7 +40,7 @@ public:
         session_close_cb_ = std::move(cb);
     }
 
-    void set_session_tag(std::string tag) { session_tag_ = std::move(tag); }
+    void set_log_tag(std::string tag) { session_tag_ = std::move(tag); }
 
     void on_session_stop() override;
 

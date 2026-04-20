@@ -192,7 +192,7 @@ void Engine::do_start_session(const std::string& descriptor, uint32_t sid) {
     auto control_svc = std::make_shared<service::ControlService>(
         send_fn, config_, peer_services);
     control_svc->set_channel(kControlChannelId);
-    control_svc->set_session_tag("s" + std::to_string(sid));
+    control_svc->set_log_tag("s" + std::to_string(sid));
     control_svc->set_session_close_callback(
         [weak = std::weak_ptr<session::Session>(session)] {
             if (auto s = weak.lock()) {
