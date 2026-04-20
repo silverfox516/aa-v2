@@ -89,17 +89,17 @@ private:
     void start_state_timer(uint32_t timeout_ms);
     void on_state_timeout();
 
-    // Handshake
+    // Handshake (order: VERSION → SSL → AUTH → SERVICE_DISCOVERY)
+    void begin_version_exchange();
     void begin_ssl_handshake();
     void on_ssl_data_received(const uint8_t* data, std::size_t size);
     void on_ssl_complete();
     void send_version_request();
     void on_version_response(const std::vector<uint8_t>& payload);
     void on_auth_complete(const std::vector<uint8_t>& payload);
-    void send_service_discovery_request();
-    void on_service_discovery_response(const std::vector<uint8_t>& payload);
-    void open_channels();
-    void on_channel_open_response(const std::vector<uint8_t>& payload);
+    void on_service_discovery_request(const std::vector<uint8_t>& payload);
+    void send_service_discovery_response();
+    void on_channel_open_request(const std::vector<uint8_t>& payload);
 
     // Ping
     void start_ping_timer();

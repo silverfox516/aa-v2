@@ -64,11 +64,13 @@ void AndroidUsbTransport::async_write(asio::const_buffer buffer,
     auto exec = executor_;
     if (n < 0) {
         int err = errno;
-        AA_LOG_E("write ioctl failed: %s (errno=%d)", strerror(err), err);
+        AA_LOG_E("write failed: %s (errno=%d, ep=0x%02x, len=%u)",
+                 strerror(err), err, ep_out_, bulk.len);
         asio::post(exec, [handler, err] {
             handler(std::error_code(err, std::system_category()), 0);
         });
     } else {
+        AA_LOG_D("write: %d bytes on ep=0x%02x", n, ep_out_);
         std::size_t written = static_cast<std::size_t>(n);
         asio::post(exec, [handler, written] {
             handler({}, written);
@@ -177,6 +179,7 @@ void AndroidUsbTransport::read_loop() {
         }
 
         // Success — deliver data
+        AA_LOG_D("read: %d bytes on ep=0x%02x", n, ep_in_);
         std::size_t bytes_read = static_cast<std::size_t>(n);
         transport::ReadHandler handler;
         {

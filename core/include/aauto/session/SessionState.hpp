@@ -8,11 +8,11 @@ enum class SessionState : uint8_t {
     /// Transport assigned but not yet open.
     Idle,
 
-    /// SSL/TLS handshake in progress.
-    SslHandshake,
-
-    /// VERSION_REQUEST sent, awaiting VERSION_RESPONSE.
+    /// VERSION_REQUEST sent, awaiting VERSION_RESPONSE + AUTH_COMPLETE.
     VersionExchange,
+
+    /// SSL/TLS handshake in progress (after AUTH_COMPLETE).
+    SslHandshake,
 
     /// SERVICE_DISCOVERY_REQUEST sent, awaiting response.
     ServiceDiscovery,
@@ -40,8 +40,8 @@ inline bool is_terminal(SessionState s) {
 inline const char* to_string(SessionState s) {
     switch (s) {
         case SessionState::Idle:             return "Idle";
-        case SessionState::SslHandshake:     return "SslHandshake";
         case SessionState::VersionExchange:  return "VersionExchange";
+        case SessionState::SslHandshake:     return "SslHandshake";
         case SessionState::ServiceDiscovery: return "ServiceDiscovery";
         case SessionState::ChannelSetup:     return "ChannelSetup";
         case SessionState::Running:          return "Running";
