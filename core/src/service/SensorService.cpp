@@ -11,6 +11,7 @@
 #include <aap_protobuf/service/sensorsource/message/SensorBatch.pb.h>
 #include <aap_protobuf/service/sensorsource/message/DrivingStatusData.pb.h>
 #include <aap_protobuf/service/sensorsource/message/SensorRequest.pb.h>
+#include <aap_protobuf/service/sensorsource/message/SensorStartResponseMessage.pb.h>
 #include <aap_protobuf/shared/MessageStatus.pb.h>
 
 namespace aauto::service {
@@ -32,9 +33,13 @@ SensorService::SensorService(SendMessageFn send_fn)
         [this](const uint8_t* data, std::size_t size) {
             pb_sensor::SensorRequest req;
             if (req.ParseFromArray(data, static_cast<int>(size))) {
-                AA_LOG_I("sensor start request: type=%d period=%lld",
-                         req.type(),
-                         static_cast<long long>(req.min_update_period()));
+                AA_LOG_I("sensor start request: type=%d", req.type());
+
+                // Send SensorStartResponse(SUCCESS)
+                pb_sensor::SensorStartResponseMessage resp;
+                resp.set_status(aap_protobuf::shared::STATUS_SUCCESS);
+                send(static_cast<uint16_t>(SensorMessageType::Response),
+                     serialize(resp));
 
                 if (req.type() == pb_sensor::SENSOR_DRIVING_STATUS_DATA) {
                     send_driving_status();

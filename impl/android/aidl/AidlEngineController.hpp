@@ -33,11 +33,6 @@ public:
         int32_t epIn, int32_t epOut,
         int32_t* _aidl_return) override;
 
-    android::binder::Status setSurface(
-        int32_t sessionId,
-        const android::sp<android::IBinder>& surfaceBinder) override;
-
-
     android::binder::Status sendTouchEvent(
         int32_t sessionId, int32_t x, int32_t y, int32_t action) override;
 

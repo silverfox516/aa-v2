@@ -101,11 +101,11 @@ void AudioService::on_setup(const uint8_t* data, std::size_t size) {
 
     pb_media::shared::message::Config config;
     config.set_status(pb_media::shared::message::Config::STATUS_READY);
-    config.set_max_unacked(5);
+    config.set_max_unacked(10);
     config.add_configuration_indices(0);
 
     send(static_cast<uint16_t>(MediaMessageType::Config), serialize(config));
-    AA_LOG_I("sent audio config (READY, max_unacked=5)");
+    AA_LOG_I("sent audio config (READY, max_unacked=10)");
 }
 
 void AudioService::on_config(const uint8_t* data, std::size_t size) {

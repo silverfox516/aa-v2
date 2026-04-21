@@ -93,11 +93,11 @@ void VideoService::on_setup(const uint8_t* data, std::size_t size) {
     // Respond with Config(READY)
     pb_media::shared::message::Config config;
     config.set_status(pb_media::shared::message::Config::STATUS_READY);
-    config.set_max_unacked(5);
+    config.set_max_unacked(1);
     config.add_configuration_indices(0);
 
     send(static_cast<uint16_t>(MediaMessageType::Config), serialize(config));
-    AA_LOG_I("sent media config (READY, max_unacked=5)");
+    AA_LOG_I("sent media config (READY, max_unacked=1)");
 }
 
 void VideoService::on_start(const uint8_t* data, std::size_t size) {
@@ -132,10 +132,6 @@ void VideoService::on_codec_config(const uint8_t* data, std::size_t size) {
 
 void VideoService::on_data(const uint8_t* data, std::size_t size) {
     if (!started_) return;
-    frame_count_++;
-    if (frame_count_ % 60 == 0) {
-        AA_LOG_I("daemon video frames received: %u", frame_count_);
-    }
 
     int64_t timestamp_us = 0;
     const uint8_t* frame_data = data;

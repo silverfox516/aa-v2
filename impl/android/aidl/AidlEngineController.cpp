@@ -62,12 +62,6 @@ android::binder::Status AidlEngineController::startSession(
     return android::binder::Status::ok();
 }
 
-android::binder::Status AidlEngineController::setSurface(
-        int32_t /*sessionId*/,
-        const android::sp<android::IBinder>& /*surfaceBinder*/) {
-    // No-op: media decoding happens in app process (F.12).
-    return android::binder::Status::ok();
-}
 
 android::binder::Status AidlEngineController::sendTouchEvent(
         int32_t sessionId, int32_t x, int32_t y, int32_t action) {

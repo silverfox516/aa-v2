@@ -232,8 +232,8 @@ void Session::on_fragment(AapFragment frag) {
 
     // Complete message — extract msg_type and dispatch
     if (payload.size() < 2) {
-        AA_LOG_E("ch %u: message too short (%zu bytes)", frag.channel_id,
-                 payload.size());
+        AA_LOG_W("ch %u: message too short (%zu bytes), dropping",
+                 frag.channel_id, payload.size());
         payload.clear();
         return;
     }
@@ -248,12 +248,11 @@ void Session::on_fragment(AapFragment frag) {
 
 void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
                                  std::vector<uint8_t> payload) {
-    // Suppress logging for high-frequency media data (video/audio frames)
-    bool is_media_data = (msg_type == static_cast<uint16_t>(MediaMessageType::Data));
-    if (!is_media_data) {
-        AA_LOG_D("rx [%s] %s (%zu bytes) state=%s",
+    // Suppress per-frame logs for media data (video/audio) to avoid performance hit
+    if (msg_type != static_cast<uint16_t>(MediaMessageType::Data)) {
+        AA_LOG_D("rx [%s] %s (%zu bytes)",
                  channel_name(channel_id), msg_type_name(msg_type),
-                 payload.size(), to_string(state_));
+                 payload.size());
     }
 
     // During handshake, Session handles VERSION and SSL messages directly.

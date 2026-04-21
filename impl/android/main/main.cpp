@@ -157,8 +157,8 @@ int main(int /*argc*/, char* /*argv*/[]) {
     hu_config.hu_model = "TCC803x";
     hu_config.hu_sw_ver = "1.0.0";
     hu_config.display_name = "Android Auto";
-    hu_config.video_width = 800;
-    hu_config.video_height = 480;
+    hu_config.video_width = 1280;
+    hu_config.video_height = 720;
     hu_config.video_fps = 30;
     hu_config.video_density = 160;
 

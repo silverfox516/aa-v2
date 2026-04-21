@@ -11,8 +11,7 @@ struct InputServiceConfig {
 
 class InputService : public ServiceBase {
 public:
-    InputService(SendMessageFn send_fn, InputServiceConfig config)
-        : ServiceBase(std::move(send_fn)), input_config_(config) {}
+    InputService(SendMessageFn send_fn, InputServiceConfig config);
 
     ServiceType type() const override { return ServiceType::InputSource; }
     void fill_config(aap_protobuf::service::ServiceConfiguration* config) override;

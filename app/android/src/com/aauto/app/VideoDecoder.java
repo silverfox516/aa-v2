@@ -29,8 +29,6 @@ public class VideoDecoder {
     private volatile boolean configured;
     private volatile boolean running;
     private Thread outputThread;
-    private int inputCount;
-    private int outputCount;
 
     public void setSurface(Surface surface) {
         this.surface = surface;
@@ -62,12 +60,6 @@ public class VideoDecoder {
             buf.clear();
             buf.put(data);
             codec.queueInputBuffer(idx, 0, data.length, timestampUs, 0);
-
-            inputCount++;
-            if (inputCount % 60 == 0) {
-                Log.i(TAG, "frames: in=" + inputCount + " out=" + outputCount
-                        + " drop=" + (inputCount - outputCount));
-            }
         } catch (Exception e) {
             Log.w(TAG, "feedData error", e);
         }
@@ -128,7 +120,6 @@ public class VideoDecoder {
                 int idx = codec.dequeueOutputBuffer(info, OUTPUT_TIMEOUT_US);
                 if (idx >= 0) {
                     codec.releaseOutputBuffer(idx, System.nanoTime());
-                    outputCount++;
                 } else if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     Log.i(TAG, "output format: " + codec.getOutputFormat());
                 }

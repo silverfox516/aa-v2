@@ -10,17 +10,34 @@
 #include <aap_protobuf/service/inputsource/message/TouchEvent.pb.h>
 #include <aap_protobuf/service/inputsource/message/PointerAction.pb.h>
 #include <aap_protobuf/service/inputsource/message/TouchScreenType.pb.h>
+#include <aap_protobuf/service/media/sink/message/KeyBindingRequest.pb.h>
+#include <aap_protobuf/service/media/sink/message/KeyBindingResponse.pb.h>
+#include <aap_protobuf/shared/MessageStatus.pb.h>
 
 #include <chrono>
 
 namespace aauto::service {
 
 namespace pb_input = aap_protobuf::service::inputsource::message;
+namespace pb_keybind = aap_protobuf::service::media::sink::message;
 
 static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
     std::vector<uint8_t> buf(msg.ByteSize());
     msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
     return buf;
+}
+
+InputService::InputService(SendMessageFn send_fn, InputServiceConfig config)
+    : ServiceBase(std::move(send_fn)), input_config_(config) {
+
+    register_handler(static_cast<uint16_t>(InputMessageType::KeyBindingRequest),
+        [this](const uint8_t*, std::size_t) {
+            AA_LOG_I("KeyBindingRequest received");
+            pb_keybind::KeyBindingResponse resp;
+            resp.set_status(aap_protobuf::shared::STATUS_SUCCESS);
+            send(static_cast<uint16_t>(InputMessageType::KeyBindingResponse),
+                 serialize(resp));
+        });
 }
 
 void InputService::send_touch(int32_t x, int32_t y, int32_t action) {
