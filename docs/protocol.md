@@ -112,14 +112,63 @@ HU → Phone:  ChannelOpenResponse  {status=SUCCESS}          encrypted, ch N (t
     --- encrypted from here ---
 5.  Phone → HU:  ServiceDiscoveryRequest
 6.  HU → Phone:  ServiceDiscoveryResponse (7 channels)
-7.  Phone → HU:  AudioFocusRequest (RELEASE)
-8.  HU → Phone:  AudioFocusNotification (LOSS)
-9.  Phone → HU:  ChannelOpenRequest (ch 1, video)
-10. HU → Phone:  ChannelOpenResponse (SUCCESS)
-11. Phone → HU:  ChannelOpenRequest (ch 2, audio media)
-12. HU → Phone:  ChannelOpenResponse (SUCCESS)
-    ... (ch 3-7 same pattern)
+7.  Phone → HU:  ChannelOpenRequest (ch 1-7, sequential)
+8.  HU → Phone:  ChannelOpenResponse (SUCCESS, per channel)
+9.  HU → Phone:  VideoFocusNotification (PROJECTED, on ch 1)
+10. HU → Phone:  DrivingStatus (UNRESTRICTED, on ch 6)
+11. Phone → HU:  AudioFocusRequest (RELEASE)
+12. HU → Phone:  AudioFocusNotification (LOSS)
+13. Phone → HU:  MediaSetup (ch 2, audio media, codec=PCM)
+14. HU → Phone:  MediaConfig (READY, max_unacked=5)
+15. Phone → HU:  MediaSetup (ch 1, video, codec=H264_BP)
+16. HU → Phone:  MediaConfig (READY, max_unacked=5)
+    ... (ch 3-4 audio guidance/system same pattern)
+17. Phone → HU:  SensorStartRequest (type=DRIVING_STATUS)
+18. HU → Phone:  DrivingStatus (UNRESTRICTED)
+19. Phone → HU:  MediaStart (ch 1, video, session_id=0)
+20. Phone → HU:  VideoFocusRequest
+21. Phone → HU:  CodecConfig (H.264 SPS/PPS, 29 bytes)
+22. Phone → HU:  MediaData (H.264 frames, continuous)
 ```
+
+## 6. Media Streaming
+
+**Verified**: Samsung SM-N981N (2026-04-21)
+
+```
+Phone → HU:  MEDIA_SETUP     {codec_type}                 per media channel
+HU → Phone:  MEDIA_CONFIG    {status=READY, max_unacked=5, config_indices=[0]}
+Phone → HU:  MEDIA_START     {session_id, config_index}
+Phone → HU:  CODEC_CONFIG    (H.264 SPS/PPS for video)    type=0x0001
+Phone → HU:  MEDIA_DATA      [timestamp:8][payload]        type=0x0000
+HU → Phone:  MEDIA_ACK       {session_id, ack=1}          every max_unacked frames
+```
+
+**Key facts**:
+- MEDIA_DATA is prefixed by 8-byte int64 timestamp (microseconds)
+- HU must send ACK after `max_unacked` frames or phone stalls
+- CodecConfig (SPS/PPS) arrives as message type 0x0001 — same as VERSION_REQ
+  on channel 0, but on video channel it means CODEC_CONFIG
+
+## 7. Frame Flags
+
+**Verified**: Samsung SM-N981N (2026-04-21)
+
+Flags byte (byte 1 of AAP header):
+```
+bit[0-1]: FragInfo (0=continuation, 1=first, 2=last, 3=unfragmented)
+bit[2]:   control-on-media flag (0x04)
+bit[3]:   encrypted flag (0x08)
+```
+
+| Scenario | Flags |
+|----------|-------|
+| Plaintext handshake | 0x03 (first\|last) |
+| Encrypted on ch 0 | 0x0b (first\|last\|encrypted) |
+| Control msg on media ch (e.g., ChannelOpenResponse on ch 1) | 0x0f (first\|last\|encrypted\|control) |
+| Non-control msg on media ch (e.g., VideoFocusNotification) | 0x0b (first\|last\|encrypted) |
+
+Control message type range: 0x0001-0x0013.
 
 ---
 
@@ -131,4 +180,7 @@ HU → Phone:  ChannelOpenResponse  {status=SUCCESS}          encrypted, ch N (t
 - **Requires MicrophoneService**: will not send ChannelOpenRequest without
   media_source_service in ServiceDiscoveryResponse
 - Sends AudioFocusRequest(RELEASE) before ChannelOpen — must respond LOSS
+- Requires VideoFocusNotification(PROJECTED) + DrivingStatus(UNRESTRICTED) before
+  sending MediaSetup
+- ChannelOpenResponse must have control-on-media flag (0x04) on non-control channels
 - ServiceDiscoveryRequest includes large icon data (~800 bytes)
