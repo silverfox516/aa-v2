@@ -499,3 +499,21 @@ Test seam이 디자인의 부산물이 아니라 핵심.
   - IAudioSink/IVideoSink = outbound port
   - IEngineController = driving port (AIDL/D-Bus adapter)
 - Part A 설명에 ports/adapters 관점을 명시하면 설계 의도가 더 명확해짐.
+
+### F.12 미디어 디코딩 위치: app 프로세스 (2026-04-21)
+
+- **F.5 수정**: "미디어 데이터 IPC 안 탐" → "압축 스트림은 IPC 허용, 디코딩은 app 담당"
+- **대안**: daemon 직접 디코딩 (F.5 원안) / 압축 스트림 IPC (app 디코딩) / JNI Surface 전달
+- **선택**: 압축 스트림 IPC. daemon은 프로토콜+암호화까지, app이 디코딩+렌더링.
+- **근거**:
+  - Android Surface는 app 프로세스 소유 — daemon에서 Surface 전달이 플랫폼 한계로 불가
+    (AIDL Surface 타입 빌드 오류, IBinder 추출 API 없음, SurfaceComposerClient 비표준)
+  - H.264 압축 스트림은 FHD@60fps에서도 ~4 MB/s (메모리 대역폭의 0.1%) — IPC 비용 무시 가능
+  - 책임 분리 개선: daemon=프로토콜 전문, app=미디어+UI 전문
+- **플랫폼별 차이**:
+  - Android: AIDL 콜백으로 압축 스트림 전달 → app이 Java MediaCodec → SurfaceView
+  - Yocto: daemon이 GStreamer로 직접 디코딩 (IPC 불필요, 단일 프로세스 가능)
+- **Part A 영향**:
+  - A.4 engine 책임: "미디어 디코딩/출력" 삭제 → "미디어 스트림 추출"
+  - A.4 app 책임: "Surface/UI 제공" → "미디어 디코딩 + Surface/UI"
+  - IPC 경계에 미디어 콜백 추가 (onVideoData, onAudioData)

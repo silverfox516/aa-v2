@@ -23,6 +23,7 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
     private SurfaceView surfaceView;
     private AaService aaService;
     private UsbDevice pendingDevice;
+    private boolean surfaceReady;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,9 +61,8 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
         Log.i(TAG, "surface created");
-        if (aaService != null) {
-            aaService.setSurface(holder.getSurface());
-        }
+        surfaceReady = true;
+        trySendSurface();
     }
 
     @Override
@@ -74,6 +74,7 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
         Log.i(TAG, "surface destroyed");
+        surfaceReady = false;
         if (aaService != null) {
             aaService.setSurface(null);
         }
@@ -87,6 +88,7 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
             AaService.LocalBinder localBinder = (AaService.LocalBinder) binder;
             aaService = localBinder.getService();
             Log.i(TAG, "AaService bound");
+            trySendSurface();
 
             if (pendingDevice != null) {
                 aaService.onNewUsbDevice(pendingDevice);
@@ -100,6 +102,12 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
             Log.w(TAG, "AaService disconnected");
         }
     };
+
+    private void trySendSurface() {
+        if (aaService != null && surfaceReady) {
+            aaService.setSurface(surfaceView.getHolder().getSurface());
+        }
+    }
 
     // ===== USB intent handling =====
 

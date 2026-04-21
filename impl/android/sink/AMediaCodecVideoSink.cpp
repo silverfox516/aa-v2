@@ -25,13 +25,32 @@ void AMediaCodecVideoSink::set_native_window(void* window) {
         ANativeWindow_acquire(window_);
     }
     AA_LOG_I("native window %s", window ? "attached" : "detached");
+
+    // If config was deferred because window was not set, apply now
+    if (window_ && pending_config_) {
+        AA_LOG_I("applying deferred codec configuration");
+        configure_codec();
+    }
 }
 
 void AMediaCodecVideoSink::on_configure(const sink::VideoConfig& config) {
+    pending_config_ = std::make_unique<sink::VideoConfig>(config);
+
+    if (!window_) {
+        AA_LOG_I("on_configure deferred (no window yet): %ux%u",
+                 config.width, config.height);
+        return;
+    }
+    configure_codec();
+}
+
+void AMediaCodecVideoSink::configure_codec() {
     release_codec();
 
+    if (!pending_config_ || !window_) return;
+    auto& config = *pending_config_;
+
     const char* mime = "video/avc";  // H.264
-    // TODO: select mime based on config.codec_type (VP9, H265, etc.)
 
     codec_ = AMediaCodec_createDecoderByType(mime);
     if (!codec_) {

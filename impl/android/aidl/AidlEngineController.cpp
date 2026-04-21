@@ -3,9 +3,6 @@
 #include "AidlEngineController.hpp"
 #include "aauto/utils/Logger.hpp"
 
-#include <android/native_window.h>
-#include <gui/IGraphicBufferProducer.h>
-#include <gui/Surface.h>
 #include <unistd.h>
 
 namespace aauto::impl {
@@ -46,24 +43,10 @@ android::binder::Status AidlEngineController::startSession(
 }
 
 android::binder::Status AidlEngineController::setSurface(
-        int32_t sessionId,
-        const android::sp<android::IBinder>& surfaceBinder) {
-    ANativeWindow* window = nullptr;
-    if (surfaceBinder != nullptr) {
-        auto gbp = android::interface_cast<android::IGraphicBufferProducer>(
-            surfaceBinder);
-        if (gbp != nullptr) {
-            auto surface = new android::Surface(gbp, /*controlledByApp=*/true);
-            window = static_cast<ANativeWindow*>(surface);
-        }
-    }
-
-    AA_LOG_I("setSurface: session=%d window=%p", sessionId, window);
-    engine_->set_video_surface(static_cast<uint32_t>(sessionId), window);
-
-    if (window) {
-        ANativeWindow_release(window);
-    }
+        int32_t /*sessionId*/,
+        const android::sp<android::IBinder>& /*surfaceBinder*/) {
+    // Surface passing not used — media decoding happens in app process.
+    // Kept for AIDL compatibility; no-op.
     return android::binder::Status::ok();
 }
 
@@ -117,6 +100,36 @@ void AidlEngineController::on_phone_identified(
         const std::string& device_name,
         const std::string& /*instance_id*/) {
     AA_LOG_I("phone identified: %s", device_name.c_str());
+}
+
+void AidlEngineController::on_video_data(
+        uint32_t session_id,
+        const uint8_t* data, std::size_t size,
+        int64_t timestamp_us, bool is_config) {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (callback_ != nullptr) {
+        std::vector<uint8_t> buf(data, data + size);
+        callback_->onVideoData(
+            static_cast<int32_t>(session_id),
+            buf,
+            timestamp_us,
+            is_config);
+    }
+}
+
+void AidlEngineController::on_audio_data(
+        uint32_t session_id, uint32_t stream_type,
+        const uint8_t* data, std::size_t size,
+        int64_t timestamp_us) {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (callback_ != nullptr) {
+        std::vector<uint8_t> buf(data, data + size);
+        callback_->onAudioData(
+            static_cast<int32_t>(session_id),
+            static_cast<int32_t>(stream_type),
+            buf,
+            timestamp_us);
+    }
 }
 
 } // namespace aauto::impl

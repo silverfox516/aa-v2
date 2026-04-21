@@ -41,6 +41,12 @@ public:
     void on_phone_identified(uint32_t session_id,
                              const std::string& device_name,
                              const std::string& instance_id) override;
+    void on_video_data(uint32_t session_id,
+                       const uint8_t* data, std::size_t size,
+                       int64_t timestamp_us, bool is_config) override;
+    void on_audio_data(uint32_t session_id, uint32_t stream_type,
+                       const uint8_t* data, std::size_t size,
+                       int64_t timestamp_us) override;
 
 private:
     engine::IEngineController* engine_;

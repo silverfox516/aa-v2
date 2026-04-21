@@ -6,10 +6,11 @@
 #include "aauto/service/InputService.hpp"
 #include "aauto/service/SensorService.hpp"
 #include "aauto/service/MicrophoneService.hpp"
+#include "aauto/sink/CallbackVideoSink.hpp"
+#include "aauto/sink/CallbackAudioSink.hpp"
 #include "aauto/utils/Logger.hpp"
 
 #include "../transport/AndroidUsbTransport.hpp"
-#include "../sink/AMediaCodecVideoSink.hpp"
 #include "../../common/crypto/OpenSslCryptoStrategy.hpp"
 #include "../aidl/AidlEngineController.hpp"
 
@@ -32,7 +33,6 @@ public:
     std::shared_ptr<transport::ITransport>
     create(asio::any_io_executor executor,
            const std::string& descriptor) override {
-        // descriptor format: "usb:fd=42,ep_in=129,ep_out=1"
         int fd = -1, ep_in = -1, ep_out = -1;
 
         auto parse_int = [&](const std::string& key) -> int {
@@ -64,55 +64,70 @@ public:
 
 class AndroidServiceFactory : public engine::IServiceFactory {
 public:
-    explicit AndroidServiceFactory(
-        std::shared_ptr<impl::AMediaCodecVideoSink> video_sink)
-        : video_sink_(std::move(video_sink)) {}
+    using VideoDataCb = std::function<void(uint32_t session_id,
+        const uint8_t* data, std::size_t size, int64_t ts, bool is_config)>;
+    using AudioDataCb = std::function<void(uint32_t session_id,
+        uint32_t stream_type, const uint8_t* data, std::size_t size, int64_t ts)>;
+
+    AndroidServiceFactory(VideoDataCb video_cb, AudioDataCb audio_cb)
+        : video_cb_(std::move(video_cb))
+        , audio_cb_(std::move(audio_cb)) {}
 
     std::map<int32_t, std::shared_ptr<service::IService>>
     create_services(service::SendMessageFn send_fn) override {
         std::map<int32_t, std::shared_ptr<service::IService>> services;
 
-        // Channel 1: Video sink
+        // Channel 1: Video — forward H.264 NALUs to app via callback
         service::VideoServiceConfig vcfg{800, 480, 30, 160};
+        auto video_sink = std::make_shared<sink::CallbackVideoSink>(
+            [this](const uint8_t* data, std::size_t size,
+                   int64_t ts, bool is_config) {
+                if (video_cb_) video_cb_(current_session_id_, data, size, ts, is_config);
+            });
         std::vector<std::shared_ptr<sink::IVideoSink>> video_sinks;
-        video_sinks.push_back(video_sink_);
+        video_sinks.push_back(video_sink);
         services[1] = std::make_shared<service::VideoService>(
             send_fn, vcfg, std::move(video_sinks));
 
-        // Channel 2: Audio sink (media)
-        std::vector<std::shared_ptr<sink::IAudioSink>> no_sinks;
-        service::AudioServiceConfig acfg_media{
-            sink::AudioStreamType::Media, 48000, 16, 2};
-        services[2] = std::make_shared<service::AudioService>(
-            send_fn, acfg_media, no_sinks);
+        // Channel 2-4: Audio — forward PCM to app via callback
+        auto make_audio = [&](int ch, sink::AudioStreamType st,
+                              uint32_t rate, uint32_t bits, uint32_t channels) {
+            auto audio_sink = std::make_shared<sink::CallbackAudioSink>(
+                [this](uint32_t stream_type, const uint8_t* data,
+                       std::size_t size, int64_t ts) {
+                    if (audio_cb_) audio_cb_(current_session_id_, stream_type,
+                                            data, size, ts);
+                });
+            std::vector<std::shared_ptr<sink::IAudioSink>> sinks;
+            sinks.push_back(audio_sink);
+            service::AudioServiceConfig acfg{st, rate, bits, channels};
+            services[ch] = std::make_shared<service::AudioService>(
+                send_fn, acfg, std::move(sinks));
+        };
 
-        // Channel 3: Audio sink (guidance)
-        service::AudioServiceConfig acfg_guide{
-            sink::AudioStreamType::Guidance, 16000, 16, 1};
-        services[3] = std::make_shared<service::AudioService>(
-            send_fn, acfg_guide, no_sinks);
-
-        // Channel 4: Audio sink (system)
-        service::AudioServiceConfig acfg_sys{
-            sink::AudioStreamType::System, 16000, 16, 1};
-        services[4] = std::make_shared<service::AudioService>(
-            send_fn, acfg_sys, no_sinks);
+        make_audio(2, sink::AudioStreamType::Media, 48000, 16, 2);
+        make_audio(3, sink::AudioStreamType::Guidance, 16000, 16, 1);
+        make_audio(4, sink::AudioStreamType::System, 16000, 16, 1);
 
         // Channel 5: Input source (touchscreen)
         service::InputServiceConfig icfg{800, 480};
         services[5] = std::make_shared<service::InputService>(send_fn, icfg);
 
-        // Channel 6: Sensor source (driving status + night mode)
+        // Channel 6: Sensor source
         services[6] = std::make_shared<service::SensorService>(send_fn);
 
-        // Channel 7: Microphone source (stub — required by some phones)
+        // Channel 7: Microphone source (stub)
         services[7] = std::make_shared<service::MicrophoneService>(send_fn);
 
         return services;
     }
 
+    void set_session_id(uint32_t id) { current_session_id_ = id; }
+
 private:
-    std::shared_ptr<impl::AMediaCodecVideoSink> video_sink_;
+    VideoDataCb video_cb_;
+    AudioDataCb audio_cb_;
+    uint32_t current_session_id_ = 0;
 };
 
 engine::Engine* g_engine = nullptr;
@@ -126,22 +141,12 @@ void signal_handler(int sig) {
 
 } // anonymous namespace
 
-/// aa-engine native daemon.
-///
-/// Registers as a binder service ("aa-engine") and waits for the
-/// Android app to connect via AIDL. The app passes USB accessory fd
-/// and Surface for video output.
 int main(int /*argc*/, char* /*argv*/[]) {
     AA_LOG_I("aa-engine daemon starting");
 
-    // Initialize binder
     android::sp<android::ProcessState> ps = android::ProcessState::self();
     ps->startThreadPool();
 
-    // Create platform video sink
-    auto video_sink = std::make_shared<impl::AMediaCodecVideoSink>();
-
-    // Configure engine
     engine::HeadunitConfig hu_config;
     hu_config.hu_make = "Telechips";
     hu_config.hu_model = "TCC803x";
@@ -152,19 +157,34 @@ int main(int /*argc*/, char* /*argv*/[]) {
     hu_config.video_fps = 30;
     hu_config.video_density = 160;
 
-    // Create factories
+    // AIDL controller (created first so we can wire callbacks)
+    // Will be registered as binder service below.
+    impl::AidlEngineController* aidl_raw = nullptr;
+
+    // Service factory with media callbacks → AIDL → app
+    auto service_factory = std::make_shared<AndroidServiceFactory>(
+        // Video callback
+        [&aidl_raw](uint32_t sid, const uint8_t* data, std::size_t size,
+                    int64_t ts, bool is_config) {
+            if (aidl_raw) aidl_raw->on_video_data(sid, data, size, ts, is_config);
+        },
+        // Audio callback
+        [&aidl_raw](uint32_t sid, uint32_t stream_type,
+                    const uint8_t* data, std::size_t size, int64_t ts) {
+            if (aidl_raw) aidl_raw->on_audio_data(sid, stream_type, data, size, ts);
+        }
+    );
+
     auto transport_factory = std::make_shared<AndroidTransportFactory>();
     auto crypto_factory = std::make_shared<AndroidCryptoFactory>();
-    auto service_factory = std::make_shared<AndroidServiceFactory>(video_sink);
 
-    // Create engine
     engine::Engine engine(hu_config, transport_factory,
                           crypto_factory, service_factory);
     g_engine = &engine;
 
-    // Create AIDL controller and register as binder service
     android::sp<impl::AidlEngineController> aidl_controller =
         new impl::AidlEngineController(&engine);
+    aidl_raw = aidl_controller.get();
 
     android::status_t status = android::defaultServiceManager()->addService(
         android::String16("aa-engine"), aidl_controller);
@@ -174,18 +194,14 @@ int main(int /*argc*/, char* /*argv*/[]) {
     }
     AA_LOG_I("binder service 'aa-engine' registered");
 
-    // Signal handling
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    // Binder thread pool runs in background threads (started by startThreadPool above).
-    // Main thread runs the engine event loop — blocks until engine.shutdown().
-    // Signal handler calls engine.shutdown() which unblocks run().
     AA_LOG_I("engine event loop starting (main thread)");
     engine.run(1);
     AA_LOG_I("engine event loop exited");
 
-    AA_LOG_I("aa-engine daemon exiting");
     g_engine = nullptr;
+    aidl_raw = nullptr;
     return 0;
 }

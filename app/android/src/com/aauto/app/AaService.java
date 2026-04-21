@@ -28,6 +28,7 @@ public class AaService extends Service implements UsbMonitor.Listener {
     private IAAEngine engineProxy;
     private int currentSessionId = -1;
     private int connectRetryCount = 0;
+    private Surface pendingSurface;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     public class LocalBinder extends Binder {
@@ -37,6 +38,8 @@ public class AaService extends Service implements UsbMonitor.Listener {
     }
 
     private final LocalBinder binder = new LocalBinder();
+
+    private VideoDecoder videoDecoder;
 
     private final IAAEngineCallback.Stub engineCallback =
             new IAAEngineCallback.Stub() {
@@ -49,6 +52,20 @@ public class AaService extends Service implements UsbMonitor.Listener {
         public void onSessionError(int sessionId, int errorCode, String message) {
             Log.e(TAG, "session " + sessionId + " error " + errorCode +
                     ": " + message);
+        }
+
+        @Override
+        public void onVideoData(int sessionId, byte[] data, long timestampUs,
+                                boolean isConfig) {
+            if (videoDecoder != null) {
+                videoDecoder.feedData(data, timestampUs, isConfig);
+            }
+        }
+
+        @Override
+        public void onAudioData(int sessionId, int streamType, byte[] data,
+                                long timestampUs) {
+            // TODO: audio playback via AudioTrack
         }
     };
 
@@ -97,6 +114,11 @@ public class AaService extends Service implements UsbMonitor.Listener {
             ParcelFileDescriptor pfd = ParcelFileDescriptor.adoptFd(fd);
             currentSessionId = engineProxy.startSession(pfd, epIn, epOut);
             Log.i(TAG, "session started: id=" + currentSessionId);
+
+            // If Surface was set before session started, send it now
+            if (pendingSurface != null && currentSessionId > 0) {
+                setSurface(pendingSurface);
+            }
         } catch (RemoteException e) {
             Log.e(TAG, "failed to start session", e);
         }
@@ -120,27 +142,20 @@ public class AaService extends Service implements UsbMonitor.Listener {
     }
 
     public void setSurface(Surface surface) {
-        if (engineProxy == null || currentSessionId <= 0) {
-            Log.w(TAG, "setSurface: engine not ready or no session");
-            return;
-        }
-        try {
-            // Extract IGraphicBufferProducer binder token from Surface.
-            // Surface.writeToParcel writes: name(String) + IGBP(IBinder).
-            IBinder token = null;
-            if (surface != null) {
-                Parcel p = Parcel.obtain();
-                surface.writeToParcel(p, 0);
-                p.setDataPosition(0);
-                p.readString();  // skip surface name
-                token = p.readStrongBinder();
-                p.recycle();
+        pendingSurface = surface;
+
+        if (surface != null) {
+            if (videoDecoder == null) {
+                videoDecoder = new VideoDecoder();
             }
-            engineProxy.setSurface(currentSessionId, token);
-            Log.i(TAG, "setSurface: session=" + currentSessionId +
-                    " surface=" + (surface != null ? "attached" : "detached"));
-        } catch (RemoteException e) {
-            Log.e(TAG, "setSurface failed", e);
+            videoDecoder.setSurface(surface);
+            Log.i(TAG, "setSurface: decoder ready");
+        } else {
+            if (videoDecoder != null) {
+                videoDecoder.release();
+                videoDecoder = null;
+            }
+            Log.i(TAG, "setSurface: decoder released");
         }
     }
 

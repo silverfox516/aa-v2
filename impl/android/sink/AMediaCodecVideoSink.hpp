@@ -6,6 +6,7 @@
 #include <android/native_window.h>
 
 #include <atomic>
+#include <memory>
 #include <thread>
 
 namespace aauto::impl {
@@ -28,6 +29,7 @@ public:
 private:
     bool submit_buffer(const uint8_t* data, std::size_t size,
                        int64_t timestamp_us, uint32_t flags);
+    void configure_codec();
     void output_loop();
     void release_codec();
 
@@ -35,6 +37,7 @@ private:
     ANativeWindow* window_ = nullptr;
     std::atomic<bool> running_{false};
     std::thread output_thread_;
+    std::unique_ptr<sink::VideoConfig> pending_config_;
 };
 
 } // namespace aauto::impl

@@ -30,6 +30,16 @@ public:
     virtual void on_phone_identified(uint32_t session_id,
                                      const std::string& device_name,
                                      const std::string& instance_id) = 0;
+
+    /// Compressed video data (H.264 NALUs) for app-side decoding.
+    virtual void on_video_data(uint32_t session_id,
+                               const uint8_t* data, std::size_t size,
+                               int64_t timestamp_us, bool is_config) = 0;
+
+    /// PCM audio data for app-side playback.
+    virtual void on_audio_data(uint32_t session_id, uint32_t stream_type,
+                               const uint8_t* data, std::size_t size,
+                               int64_t timestamp_us) = 0;
 };
 
 /// Driving port: app -> engine commands.
