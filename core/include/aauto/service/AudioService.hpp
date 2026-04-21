@@ -39,8 +39,6 @@ private:
 
     AudioServiceConfig                             audio_config_;
     std::vector<std::shared_ptr<sink::IAudioSink>> sinks_;
-    uint32_t max_unacked_   = 5;
-    uint32_t unacked_count_ = 0;
     int32_t  session_id_    = 0;
     bool     started_       = false;
     sink::AudioConfig current_config_{};

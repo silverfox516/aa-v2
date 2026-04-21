@@ -111,10 +111,7 @@ void AudioService::on_setup(const uint8_t* data, std::size_t size) {
 void AudioService::on_config(const uint8_t* data, std::size_t size) {
     pb_media::shared::message::Config config;
     if (config.ParseFromArray(data, static_cast<int>(size))) {
-        if (config.has_max_unacked()) {
-            max_unacked_ = config.max_unacked();
-        }
-        AA_LOG_I("audio config received, max_unacked=%u", max_unacked_);
+        AA_LOG_I("audio config received");
     }
 }
 
@@ -128,7 +125,6 @@ void AudioService::on_start(const uint8_t* data, std::size_t size) {
     }
 
     started_ = true;
-    unacked_count_ = 0;
 
     for (auto& sink : sinks_) {
         sink->on_configure(current_config_, audio_config_.stream_type);
@@ -158,11 +154,7 @@ void AudioService::on_data(const uint8_t* data, std::size_t size) {
     for (auto& sink : sinks_) {
         sink->on_audio_data(pcm_data, pcm_size, timestamp_us);
     }
-    unacked_count_++;
-    if (unacked_count_ >= max_unacked_) {
-        send_ack();
-        unacked_count_ = 0;
-    }
+    send_ack();
 }
 
 void AudioService::on_stop(const uint8_t* /*data*/, std::size_t /*size*/) {

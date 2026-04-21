@@ -146,9 +146,9 @@ HU → Phone:  MEDIA_ACK       {session_id, ack=1}          every max_unacked fr
 
 **Key facts**:
 - MEDIA_DATA is prefixed by 8-byte int64 timestamp (microseconds)
-- HU must send ACK after `max_unacked` frames or phone stalls
 - CodecConfig (SPS/PPS) arrives as message type 0x0001 — same as VERSION_REQ
   on channel 0, but on video channel it means CODEC_CONFIG
+- Phone uses credit-based flow control (see ACK section below)
 
 ## 7. AAP Wire Frame Format
 
@@ -169,6 +169,12 @@ Byte 4...:  payload (payload_length bytes)
 - **Fragmentation**: payloads larger than 16 KiB are split into multiple frames.
   The first fragment has FragInfo=First, intermediate ones Continuation, last one Last.
   Unfragmented messages use FragInfo=Unfragmented (3).
+- **Multi-first header**: First fragments (First, NOT Unfragmented) carry an extra
+  4-byte `total_size` field between the header and payload. This field is NOT
+  included in `payload_length`. Wire layout: `[header:4][total_size:4][data:payload_length]`.
+- **Encryption**: each fragment must be decrypted individually via SSL_read
+  (per-fragment decrypt model). Do NOT reassemble ciphertext before decrypting —
+  TLS records do not align with AAP message boundaries.
 
 ### Flags byte (byte 1):
 ```
@@ -186,6 +192,47 @@ bit[3]:   encrypted flag (0x08)
 
 Control message type range: 0x0001-0x0013.
 
+## 8. ACK and Flow Control
+
+**Verified**: Samsung SM-N981N (2026-04-22)
+
+Phone uses **credit-based flow control** for media streams:
+
+- `max_unacked` in MEDIA_CONFIG: window size (max frames in flight)
+- `ack` field in MEDIA_ACK: credits returned to phone
+- Phone starts with `max_unacked` credits. Each frame sent decrements credits.
+  When credits reach 0, phone stops sending until ACK arrives.
+
+**Critical**: HU must ACK every frame immediately. If HU batches ACKs
+(e.g., ACK every 10 frames), the phone exhausts credits after the initial
+burst and falls back to ~3fps (one frame per ACK round-trip).
+
+```
+HU → Phone:  MEDIA_CONFIG {max_unacked=10}     "you can buffer 10"
+Phone → HU:  MEDIA_DATA (frame 1)               credit: 9
+Phone → HU:  MEDIA_DATA (frame 2)               credit: 8
+HU → Phone:  MEDIA_ACK {ack=1}                  credit: 9
+Phone → HU:  MEDIA_DATA (frame 3)               credit: 8
+HU → Phone:  MEDIA_ACK {ack=1}                  credit: 9
+...
+```
+
+## 9. Required Responses
+
+Messages the phone sends that REQUIRE a response. Missing any of these
+causes the phone to stall or delay video start.
+
+| Phone sends | HU must respond | Effect if missing |
+|-------------|-----------------|-------------------|
+| ServiceDiscoveryRequest | ServiceDiscoveryResponse | No ChannelOpen |
+| ChannelOpenRequest | ChannelOpenResponse(SUCCESS) | Channel not active |
+| AudioFocusRequest(RELEASE) | AudioFocusNotification(LOSS) | Phone stalls |
+| MediaSetup | MediaConfig(READY) | No MediaStart |
+| SensorStartRequest | **SensorStartResponse(SUCCESS)** + data | Video start delayed |
+| KeyBindingRequest | **KeyBindingResponse(SUCCESS)** | Input not active |
+| MEDIA_DATA | **MEDIA_ACK** (every frame) | fps drops to ~3 |
+| PingRequest | PingResponse (echo timestamp) | Session timeout |
+
 ---
 
 ## Device-Specific Notes
@@ -199,4 +246,12 @@ Control message type range: 0x0001-0x0013.
 - Requires VideoFocusNotification(PROJECTED) + DrivingStatus(UNRESTRICTED) before
   sending MediaSetup
 - ChannelOpenResponse must have control-on-media flag (0x04) on non-control channels
+- SensorStartResponse required before video starts (causes multi-second delay if missing)
+- Credit-based ACK: must ACK every frame for 30fps
 - ServiceDiscoveryRequest includes large icon data (~800 bytes)
+
+### Telechips TCC803x (Android 10 IVI)
+
+- **ubsan mul-overflow**: `MediaCodec.releaseOutputBuffer(idx, true)` crashes in
+  libstagefright. Use explicit timestamp: `releaseOutputBuffer(idx, System.nanoTime())`
+- `android.car.usb.handler` system app intercepts USB devices — may need to be disabled
