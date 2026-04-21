@@ -150,11 +150,27 @@ HU → Phone:  MEDIA_ACK       {session_id, ack=1}          every max_unacked fr
 - CodecConfig (SPS/PPS) arrives as message type 0x0001 — same as VERSION_REQ
   on channel 0, but on video channel it means CODEC_CONFIG
 
-## 7. Frame Flags
+## 7. AAP Wire Frame Format
 
-**Verified**: Samsung SM-N981N (2026-04-21)
+Every message on the USB transport is wrapped in an AAP frame:
 
-Flags byte (byte 1 of AAP header):
+```
+Byte 0:     channel_id (uint8)
+Byte 1:     flags (see below)
+Byte 2-3:   payload_length (uint16, big-endian)
+Byte 4...:  payload (payload_length bytes)
+              └─ [message_type:2 BE][protobuf body]
+                 (encrypted as a whole after SSL handshake)
+```
+
+- **channel_id**: identifies which service this frame belongs to (0=control, 1=video, ...)
+- **payload**: after SSL, the entire payload (including the 2-byte message type) is
+  TLS-encrypted. The header (bytes 0-3) is always plaintext.
+- **Fragmentation**: payloads larger than 16 KiB are split into multiple frames.
+  The first fragment has FragInfo=First, intermediate ones Continuation, last one Last.
+  Unfragmented messages use FragInfo=Unfragmented (3).
+
+### Flags byte (byte 1):
 ```
 bit[0-1]: FragInfo (0=continuation, 1=first, 2=last, 3=unfragmented)
 bit[2]:   control-on-media flag (0x04)
