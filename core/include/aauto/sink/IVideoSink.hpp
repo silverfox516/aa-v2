@@ -2,15 +2,17 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <vector>
 
 namespace aauto::sink {
 
 struct VideoConfig {
-    uint32_t width;
-    uint32_t height;
-    uint32_t fps;
-    uint32_t density;
-    uint32_t codec_type;  // MediaCodecType enum value
+    uint32_t width   = 0;
+    uint32_t height  = 0;
+    uint32_t fps     = 0;
+    uint32_t density = 0;
+    uint32_t codec_type = 0;  // MediaCodecType enum value
+    std::vector<uint8_t> codec_data;  // SPS/PPS for H.264
 };
 
 /// Outbound port: receives video data (H.264 NALUs etc.)

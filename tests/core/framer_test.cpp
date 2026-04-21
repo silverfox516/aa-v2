@@ -162,7 +162,7 @@ TEST_F(FramerTest, DecodeFragmentedFrame) {
 TEST_F(FramerTest, EncodeSmallFrame) {
     OutboundFrame out;
     out.channel_id = 2;
-    out.encrypt = false;
+    out.flags = compute_frame_flags(2, 0x0001, false);
     out.payload = make_payload(0x0001, {0xDE, 0xAD});
 
     auto wire_frames = framer_.encode(out);
@@ -179,7 +179,7 @@ TEST_F(FramerTest, EncodeSmallFrame) {
 TEST_F(FramerTest, EncodeWithEncryptFlag) {
     OutboundFrame out;
     out.channel_id = 1;
-    out.encrypt = true;
+    out.flags = compute_frame_flags(1, 0x8000, true);
     out.payload = {0x00, 0x01, 0xFF};
 
     auto wire_frames = framer_.encode(out);
@@ -191,7 +191,7 @@ TEST_F(FramerTest, EncodeWithEncryptFlag) {
 TEST_F(FramerTest, EncodeLargeFrameFragments) {
     OutboundFrame out;
     out.channel_id = 0;
-    out.encrypt = false;
+    out.flags = compute_frame_flags(0, 0x0001, false);
     // Payload larger than kMaxFramePayloadSize (16384)
     out.payload.resize(kMaxFramePayloadSize + 100, 0xAB);
 
@@ -209,7 +209,7 @@ TEST_F(FramerTest, EncodeLargeFrameFragments) {
 TEST_F(FramerTest, EncodeDecodeRoundTrip) {
     OutboundFrame out;
     out.channel_id = 7;
-    out.encrypt = false;
+    out.flags = compute_frame_flags(7, 0x8002, false);
     out.payload = make_payload(0x8002, {0x01, 0x02, 0x03, 0x04, 0x05});
 
     auto wire_frames = framer_.encode(out);
@@ -228,7 +228,7 @@ TEST_F(FramerTest, EncodeDecodeRoundTrip) {
 TEST_F(FramerTest, EncodeDecodeLargeRoundTrip) {
     OutboundFrame out;
     out.channel_id = 3;
-    out.encrypt = true;
+    out.flags = compute_frame_flags(3, 0x0000, true);
     // Build large payload: [msg_type:2][body]
     std::vector<uint8_t> body(kMaxFramePayloadSize * 3, 0);
     for (std::size_t i = 0; i < body.size(); ++i) {

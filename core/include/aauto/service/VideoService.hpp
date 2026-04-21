@@ -32,16 +32,15 @@ public:
 
 private:
     void on_setup(const uint8_t* data, std::size_t size);
-    void on_config(const uint8_t* data, std::size_t size);
     void on_start(const uint8_t* data, std::size_t size);
     void on_codec_config(const uint8_t* data, std::size_t size);
     void on_data(const uint8_t* data, std::size_t size);
-    void on_stop(const uint8_t* data, std::size_t size);
     void send_ack();
+    void send_video_focus(bool gain);
 
     VideoServiceConfig video_config_;
     std::vector<std::shared_ptr<sink::IVideoSink>> sinks_;
-    uint32_t max_unacked_   = 1;
+    uint32_t max_unacked_   = 5;
     uint32_t unacked_count_ = 0;
     int32_t  session_id_    = 0;
     bool     started_       = false;

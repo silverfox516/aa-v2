@@ -22,8 +22,8 @@ struct AapFrame {
 /// A frame to be sent on the wire.
 struct OutboundFrame {
     uint8_t              channel_id;
-    bool                 encrypt;
-    std::vector<uint8_t> payload;       // [message_type:2][body]
+    uint8_t              flags;         // pre-computed by Session
+    std::vector<uint8_t> payload;       // [message_type:2][body] (encrypted or plain)
 };
 
 using FrameReceivedHandler = std::function<void(const std::error_code& ec,
@@ -33,8 +33,9 @@ using FrameReceivedHandler = std::function<void(const std::error_code& ec,
 ///
 /// Wire format per frame:
 ///   Byte 0:    channel_id (uint8)
-///   Byte 1:    flags
+///   Byte 1:    flags (pre-computed by Session via compute_frame_flags)
 ///              bits[0-1]: FragInfo (0=continuation, 1=first, 2=last, 3=unfragmented)
+///              bit[2]:    control-on-media (control message on non-control channel)
 ///              bit[3]:    encrypted flag
 ///   Byte 2-3:  payload_length (uint16 big-endian)
 ///   Byte 4...: payload (payload_length bytes)

@@ -29,17 +29,18 @@ public:
     void on_message(uint16_t message_type,
                     const uint8_t* payload,
                     std::size_t payload_size) override {
-        // CHANNEL_OPEN_REQUEST: auto-respond with SUCCESS
+        // CHANNEL_OPEN_REQUEST: respond first, then notify service
         if (message_type ==
                 static_cast<uint16_t>(ControlMessageType::ChannelOpenRequest)) {
             AA_LOG_I("[%s] ChannelOpenRequest -> SUCCESS",
                      channel_name(channel_id_));
-            on_channel_open(channel_id_);
-            // Respond with ChannelOpenResponse(SUCCESS)
-            // Minimal protobuf: field 1 (MessageStatus), varint 0 (SUCCESS)
+            // Send ChannelOpenResponse BEFORE on_channel_open so the phone
+            // sees the confirmation before any follow-up messages the service
+            // might send (e.g., VideoFocusNotification, DrivingStatus).
             std::vector<uint8_t> resp = {0x08, 0x00};
             send(static_cast<uint16_t>(ControlMessageType::ChannelOpenResponse),
                  resp);
+            on_channel_open(channel_id_);
             return;
         }
 

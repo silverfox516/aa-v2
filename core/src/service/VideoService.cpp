@@ -7,11 +7,30 @@
 #include <aap_protobuf/service/Service.pb.h>
 #include <aap_protobuf/service/media/sink/MediaSinkService.pb.h>
 #include <aap_protobuf/service/media/shared/message/MediaCodecType.pb.h>
+#include <aap_protobuf/service/media/shared/message/Setup.pb.h>
+#include <aap_protobuf/service/media/shared/message/Config.pb.h>
+#include <aap_protobuf/service/media/shared/message/Start.pb.h>
 #include <aap_protobuf/service/media/sink/message/VideoCodecResolutionType.pb.h>
 #include <aap_protobuf/service/media/sink/message/VideoFrameRateType.pb.h>
 #include <aap_protobuf/service/media/sink/message/VideoConfiguration.pb.h>
+#include <aap_protobuf/service/media/video/message/VideoFocusNotification.pb.h>
+#include <aap_protobuf/service/media/video/message/VideoFocusMode.pb.h>
+#include <aap_protobuf/service/media/source/message/Ack.pb.h>
+
+#include <cstring>
 
 namespace aauto::service {
+
+namespace pb_media = aap_protobuf::service::media;
+
+static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
+    std::vector<uint8_t> buf(msg.ByteSize());
+    msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
+    return buf;
+}
+
+// AAP video MEDIA_DATA payload is prefixed by an 8-byte int64 timestamp (us).
+static constexpr std::size_t kVideoTimestampBytes = 8;
 
 VideoService::VideoService(SendMessageFn send_fn,
                            VideoServiceConfig config,
@@ -23,8 +42,6 @@ VideoService::VideoService(SendMessageFn send_fn,
     using MT = MediaMessageType;
     register_handler(static_cast<uint16_t>(MT::Setup),
                      [this](auto* d, auto s) { on_setup(d, s); });
-    register_handler(static_cast<uint16_t>(MT::Config),
-                     [this](auto* d, auto s) { on_config(d, s); });
     register_handler(static_cast<uint16_t>(MT::Start),
                      [this](auto* d, auto s) { on_start(d, s); });
     register_handler(static_cast<uint16_t>(MT::CodecConfig),
@@ -32,12 +49,21 @@ VideoService::VideoService(SendMessageFn send_fn,
     register_handler(static_cast<uint16_t>(MT::Data),
                      [this](auto* d, auto s) { on_data(d, s); });
     register_handler(static_cast<uint16_t>(MT::Stop),
-                     [this](auto* d, auto s) { on_stop(d, s); });
+                     [](auto*, auto) {
+                         AA_LOG_I("media stop received");
+                     });
+    register_handler(static_cast<uint16_t>(MT::VideoFocusRequest),
+                     [](auto*, auto) {
+                         AA_LOG_D("video focus request received");
+                     });
+    register_handler(static_cast<uint16_t>(MT::Ack),
+                     [](auto*, auto) {});
 }
 
 void VideoService::on_channel_open(uint8_t channel_id) {
     ServiceBase::on_channel_open(channel_id);
     AA_LOG_I("video channel opened: %u", channel_id);
+    send_video_focus(true);
 }
 
 void VideoService::on_channel_close() {
@@ -52,55 +78,66 @@ void VideoService::on_channel_close() {
 }
 
 void VideoService::on_setup(const uint8_t* data, std::size_t size) {
-    // TODO: parse Setup protobuf to extract codec type
-    // For now, default to H264
-    (void)data;
-    (void)size;
-    current_config_.codec_type = 3;  // VIDEO_H264_BP
-    AA_LOG_I("video setup received");
-}
+    pb_media::shared::message::Setup setup;
+    if (setup.ParseFromArray(data, static_cast<int>(size))) {
+        AA_LOG_I("media setup: codec=%d", setup.type());
+    }
 
-void VideoService::on_config(const uint8_t* data, std::size_t size) {
-    // TODO: parse Config protobuf for max_unacked, configuration indices, status
-    (void)data;
-    (void)size;
-    max_unacked_ = 5;  // reasonable default
-    AA_LOG_I("video config received, max_unacked=%u", max_unacked_);
+    // Respond with Config(READY)
+    pb_media::shared::message::Config config;
+    config.set_status(pb_media::shared::message::Config::STATUS_READY);
+    config.set_max_unacked(5);
+    config.add_configuration_indices(0);
+
+    send(static_cast<uint16_t>(MediaMessageType::Config), serialize(config));
+    AA_LOG_I("sent media config (READY, max_unacked=5)");
 }
 
 void VideoService::on_start(const uint8_t* data, std::size_t size) {
-    // TODO: parse Start protobuf for session_id, configuration_index
-    (void)data;
-    (void)size;
+    pb_media::shared::message::Start start;
+    if (start.ParseFromArray(data, static_cast<int>(size))) {
+        session_id_ = start.session_id();
+        AA_LOG_I("media start: session_id=%d config_index=%d",
+                 session_id_, start.configuration_index());
+    }
+
     started_ = true;
     unacked_count_ = 0;
 
     for (auto& sink : sinks_) {
         sink->on_configure(current_config_);
     }
-    AA_LOG_I("video start, session_id=%d", session_id_);
 }
 
 void VideoService::on_codec_config(const uint8_t* data, std::size_t size) {
-    if (!started_) {
-        AA_LOG_W("codec_config before start, ignoring");
-        return;
-    }
+    AA_LOG_I("codec config: %zu bytes", size);
+
+    current_config_.codec_data.assign(data, data + size);
+    current_config_.width = video_config_.width;
+    current_config_.height = video_config_.height;
+    current_config_.fps = video_config_.fps;
 
     for (auto& sink : sinks_) {
         sink->on_codec_config(data, size, 0);
     }
-    AA_LOG_D("video codec_config, %zu bytes", size);
+    send_ack();
 }
 
 void VideoService::on_data(const uint8_t* data, std::size_t size) {
     if (!started_) return;
 
-    // TODO: extract timestamp from first 8 bytes if present
     int64_t timestamp_us = 0;
+    const uint8_t* frame_data = data;
+    std::size_t frame_size = size;
+
+    if (size > kVideoTimestampBytes) {
+        std::memcpy(&timestamp_us, data, sizeof(timestamp_us));
+        frame_data = data + kVideoTimestampBytes;
+        frame_size = size - kVideoTimestampBytes;
+    }
 
     for (auto& sink : sinks_) {
-        sink->on_video_data(data, size, timestamp_us);
+        sink->on_video_data(frame_data, frame_size, timestamp_us);
     }
 
     unacked_count_++;
@@ -110,32 +147,34 @@ void VideoService::on_data(const uint8_t* data, std::size_t size) {
     }
 }
 
-void VideoService::on_stop(const uint8_t* /*data*/, std::size_t /*size*/) {
-    if (started_) {
-        for (auto& sink : sinks_) {
-            sink->on_stop();
-        }
-        started_ = false;
-    }
-    AA_LOG_I("video stop");
+void VideoService::send_ack() {
+    pb_media::source::message::Ack ack;
+    ack.set_session_id(session_id_);
+    ack.set_ack(1);
+    send(static_cast<uint16_t>(MediaMessageType::Ack), serialize(ack));
 }
 
-void VideoService::send_ack() {
-    // TODO: build Ack protobuf with session_id
-    std::vector<uint8_t> payload;  // empty for now
-    send(static_cast<uint16_t>(MediaMessageType::Ack), payload);
+void VideoService::send_video_focus(bool gain) {
+    namespace vf = pb_media::video::message;
+
+    vf::VideoFocusNotification ntf;
+    ntf.set_focus(gain ? vf::VIDEO_FOCUS_PROJECTED : vf::VIDEO_FOCUS_NATIVE);
+    ntf.set_unsolicited(true);
+
+    send(static_cast<uint16_t>(MediaMessageType::VideoFocusNotification),
+         serialize(ntf));
+    AA_LOG_I("sent VideoFocusNotification(%s)",
+             gain ? "PROJECTED" : "NATIVE");
 }
 
 void VideoService::fill_config(
         aap_protobuf::service::ServiceConfiguration* config) {
-    namespace pb = aap_protobuf::service::media;
-
     auto* sink = config->mutable_media_sink_service();
-    sink->set_available_type(pb::shared::message::MEDIA_CODEC_VIDEO_H264_BP);
+    sink->set_available_type(pb_media::shared::message::MEDIA_CODEC_VIDEO_H264_BP);
 
     auto* vc = sink->add_video_configs();
-    vc->set_codec_resolution(pb::sink::message::VIDEO_800x480);
-    vc->set_frame_rate(pb::sink::message::VIDEO_FPS_30);
+    vc->set_codec_resolution(pb_media::sink::message::VIDEO_800x480);
+    vc->set_frame_rate(pb_media::sink::message::VIDEO_FPS_30);
     vc->set_density(video_config_.density);
     vc->set_width_margin(0);
     vc->set_height_margin(0);

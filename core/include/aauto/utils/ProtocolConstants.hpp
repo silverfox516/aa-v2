@@ -164,6 +164,26 @@ inline std::error_code make_error_code(AapErrc e) noexcept {
     return {static_cast<int>(e), aap_category()};
 }
 
+// ===== Frame flags =====
+// Flags byte layout: [bit0-1: FragInfo] [bit2: control-on-media] [bit3: encrypted]
+constexpr uint8_t kFlagEncrypted      = 0x08;
+constexpr uint8_t kFlagControlOnMedia = 0x04;
+
+/// Compute flags byte for an outgoing frame.
+/// Session calls this; Framer uses the result as-is.
+inline uint8_t compute_frame_flags(uint8_t channel, uint16_t msg_type,
+                                   bool encrypted) {
+    uint8_t flags = static_cast<uint8_t>(FragInfo::Unfragmented);
+    if (encrypted) flags |= kFlagEncrypted;
+    // Control-type messages (type 1-19) on non-control channels need the
+    // control-on-media bit so the phone routes them correctly.
+    if (channel != kControlChannelId &&
+        msg_type >= 1 && msg_type <= 0x0013) {
+        flags |= kFlagControlOnMedia;
+    }
+    return flags;
+}
+
 // ===== Convenience aliases =====
 using ByteBuffer = std::vector<uint8_t>;
 

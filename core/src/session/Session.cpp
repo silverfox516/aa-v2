@@ -90,22 +90,24 @@ void Session::send_message(uint8_t channel_id, uint16_t message_type,
 
     if (needs_encryption) {
         auto self = shared_from_this();
+        auto flags = compute_frame_flags(channel_id, message_type, true);
         crypto_->encrypt(full_payload.data(), full_payload.size(),
-            [self, channel_id](const std::error_code& ec,
+            [self, channel_id, flags](const std::error_code& ec,
                                std::vector<uint8_t> ciphertext) {
                 if (ec) {
                     AA_LOG_E("encrypt failed: %s", ec.message().c_str());
                     self->handle_error(ec);
                     return;
                 }
-                OutboundFrame frame{channel_id, true, std::move(ciphertext)};
+                OutboundFrame frame{channel_id, flags, std::move(ciphertext)};
                 auto wire_frames = self->framer_.encode(frame);
                 for (auto& wire : wire_frames) {
                     self->enqueue_write(std::move(wire));
                 }
             });
     } else {
-        OutboundFrame frame{channel_id, false, std::move(full_payload)};
+        auto flags = compute_frame_flags(channel_id, message_type, false);
+        OutboundFrame frame{channel_id, flags, std::move(full_payload)};
         auto wire_frames = framer_.encode(frame);
         for (auto& wire : wire_frames) {
             enqueue_write(std::move(wire));
@@ -432,7 +434,8 @@ void Session::on_ssl_complete() {
     full_payload.push_back(static_cast<uint8_t>(msg_type & 0xFF));
     full_payload.insert(full_payload.end(), payload.begin(), payload.end());
 
-    OutboundFrame frame{kControlChannelId, false, std::move(full_payload)};
+    auto flags = compute_frame_flags(kControlChannelId, msg_type, false);
+    OutboundFrame frame{kControlChannelId, flags, std::move(full_payload)};
     auto wire_frames = framer_.encode(frame);
     for (auto& wire : wire_frames) {
         enqueue_write(std::move(wire));

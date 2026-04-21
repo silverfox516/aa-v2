@@ -183,13 +183,12 @@ std::vector<std::vector<uint8_t>> Framer::encode(const OutboundFrame& frame) {
     std::vector<std::vector<uint8_t>> result;
 
     const auto& payload = frame.payload;
-    uint8_t encrypt_flag = frame.encrypt ? 0x08 : 0x00;
 
     if (payload.size() <= kMaxFramePayloadSize) {
-        // Single unfragmented frame
+        // Single unfragmented frame — use pre-computed flags directly
         std::vector<uint8_t> wire(kFrameHeaderSize + payload.size());
         wire[0] = frame.channel_id;
-        wire[1] = static_cast<uint8_t>(FragInfo::Unfragmented) | encrypt_flag;
+        wire[1] = frame.flags;
         wire[2] = static_cast<uint8_t>((payload.size() >> 8) & 0xFF);
         wire[3] = static_cast<uint8_t>(payload.size() & 0xFF);
         std::memcpy(wire.data() + kFrameHeaderSize, payload.data(), payload.size());
@@ -217,7 +216,8 @@ std::vector<std::vector<uint8_t>> Framer::encode(const OutboundFrame& frame) {
 
             std::vector<uint8_t> wire(kFrameHeaderSize + chunk_size);
             wire[0] = frame.channel_id;
-            wire[1] = static_cast<uint8_t>(frag) | encrypt_flag;
+            // Replace FragInfo bits (0-1) in pre-computed flags
+            wire[1] = (frame.flags & 0xFC) | static_cast<uint8_t>(frag);
             wire[2] = static_cast<uint8_t>((chunk_size >> 8) & 0xFF);
             wire[3] = static_cast<uint8_t>(chunk_size & 0xFF);
             std::memcpy(wire.data() + kFrameHeaderSize,

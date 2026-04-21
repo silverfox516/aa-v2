@@ -8,11 +8,26 @@
 #include <aap_protobuf/service/media/sink/MediaSinkService.pb.h>
 #include <aap_protobuf/service/media/shared/message/MediaCodecType.pb.h>
 #include <aap_protobuf/service/media/shared/message/AudioConfiguration.pb.h>
+#include <aap_protobuf/service/media/shared/message/Setup.pb.h>
+#include <aap_protobuf/service/media/shared/message/Config.pb.h>
+#include <aap_protobuf/service/media/shared/message/Start.pb.h>
+#include <aap_protobuf/service/media/source/message/Ack.pb.h>
 #include <aap_protobuf/service/media/sink/message/AudioStreamType.pb.h>
+
+#include <cstring>
 
 namespace aauto::service {
 
 namespace pb_audio = aap_protobuf::service::media::sink::message;
+namespace pb_media = aap_protobuf::service::media;
+
+static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
+    std::vector<uint8_t> buf(msg.ByteSize());
+    msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
+    return buf;
+}
+
+static constexpr std::size_t kAudioTimestampBytes = 8;
 
 static pb_audio::AudioStreamType
 to_proto_stream_type(sink::AudioStreamType st) {
@@ -79,30 +94,45 @@ void AudioService::fill_config(
 }
 
 void AudioService::on_setup(const uint8_t* data, std::size_t size) {
-    (void)data;
-    (void)size;
-    current_config_.codec_type = 1;
-    AA_LOG_I("audio setup received");
+    pb_media::shared::message::Setup setup;
+    if (setup.ParseFromArray(data, static_cast<int>(size))) {
+        AA_LOG_I("audio setup: codec=%d", setup.type());
+    }
+
+    pb_media::shared::message::Config config;
+    config.set_status(pb_media::shared::message::Config::STATUS_READY);
+    config.set_max_unacked(5);
+    config.add_configuration_indices(0);
+
+    send(static_cast<uint16_t>(MediaMessageType::Config), serialize(config));
+    AA_LOG_I("sent audio config (READY, max_unacked=5)");
 }
 
 void AudioService::on_config(const uint8_t* data, std::size_t size) {
-    (void)data;
-    (void)size;
-    max_unacked_ = 5;
-    AA_LOG_I("audio config received, max_unacked=%u", max_unacked_);
+    pb_media::shared::message::Config config;
+    if (config.ParseFromArray(data, static_cast<int>(size))) {
+        if (config.has_max_unacked()) {
+            max_unacked_ = config.max_unacked();
+        }
+        AA_LOG_I("audio config received, max_unacked=%u", max_unacked_);
+    }
 }
 
 void AudioService::on_start(const uint8_t* data, std::size_t size) {
-    (void)data;
-    (void)size;
+    pb_media::shared::message::Start start;
+    if (start.ParseFromArray(data, static_cast<int>(size))) {
+        session_id_ = start.session_id();
+        AA_LOG_I("audio start: session_id=%d, stream_type=%u",
+                 session_id_,
+                 static_cast<uint32_t>(audio_config_.stream_type));
+    }
+
     started_ = true;
     unacked_count_ = 0;
 
     for (auto& sink : sinks_) {
         sink->on_configure(current_config_, audio_config_.stream_type);
     }
-    AA_LOG_I("audio start, stream_type=%u",
-             static_cast<uint32_t>(audio_config_.stream_type));
 }
 
 void AudioService::on_codec_config(const uint8_t* data, std::size_t size) {
@@ -114,9 +144,19 @@ void AudioService::on_codec_config(const uint8_t* data, std::size_t size) {
 
 void AudioService::on_data(const uint8_t* data, std::size_t size) {
     if (!started_) return;
+
     int64_t timestamp_us = 0;
+    const uint8_t* pcm_data = data;
+    std::size_t pcm_size = size;
+
+    if (size > kAudioTimestampBytes) {
+        std::memcpy(&timestamp_us, data, sizeof(timestamp_us));
+        pcm_data = data + kAudioTimestampBytes;
+        pcm_size = size - kAudioTimestampBytes;
+    }
+
     for (auto& sink : sinks_) {
-        sink->on_audio_data(data, size, timestamp_us);
+        sink->on_audio_data(pcm_data, pcm_size, timestamp_us);
     }
     unacked_count_++;
     if (unacked_count_ >= max_unacked_) {
@@ -136,8 +176,10 @@ void AudioService::on_stop(const uint8_t* /*data*/, std::size_t /*size*/) {
 }
 
 void AudioService::send_ack() {
-    std::vector<uint8_t> payload;
-    send(static_cast<uint16_t>(MediaMessageType::Ack), payload);
+    pb_media::source::message::Ack ack;
+    ack.set_session_id(session_id_);
+    ack.set_ack(1);
+    send(static_cast<uint16_t>(MediaMessageType::Ack), serialize(ack));
 }
 
 } // namespace aauto::service
