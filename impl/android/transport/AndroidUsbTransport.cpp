@@ -70,7 +70,7 @@ void AndroidUsbTransport::async_write(asio::const_buffer buffer,
             handler(std::error_code(err, std::system_category()), 0);
         });
     } else {
-        AA_LOG_D("write: %d bytes on ep=0x%02x", n, ep_out_);
+        // write complete
         std::size_t written = static_cast<std::size_t>(n);
         asio::post(exec, [handler, written] {
             handler({}, written);
@@ -179,7 +179,6 @@ void AndroidUsbTransport::read_loop() {
         }
 
         // Success — deliver data
-        AA_LOG_D("read: %d bytes on ep=0x%02x", n, ep_in_);
         std::size_t bytes_read = static_cast<std::size_t>(n);
         transport::ReadHandler handler;
         {

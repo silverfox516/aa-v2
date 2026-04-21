@@ -63,6 +63,9 @@ public:
     /// Forward native window to video service(s).
     void set_video_surface(void* native_window);
 
+    /// Forward touch event to input service(s).
+    void send_touch_event(int32_t x, int32_t y, int32_t action);
+
     SessionState state() const;
     uint32_t session_id() const { return config_.session_id; }
 
@@ -70,7 +73,7 @@ private:
     // Read loop
     void start_read();
     void on_read_complete(const std::error_code& ec, std::size_t bytes);
-    void dispatch_frame(AapFrame frame);
+    void on_fragment(AapFragment frag);
     void dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
                             std::vector<uint8_t> payload);
 
@@ -109,6 +112,9 @@ private:
     bool                                      write_in_progress_ = false;
 
     std::map<uint8_t, std::shared_ptr<service::IService>> services_;
+
+    // Per-channel plaintext accumulator (decrypt per fragment, reassemble plaintext)
+    std::map<uint8_t, std::vector<uint8_t>>   channel_payloads_;
 
     asio::steady_timer                        state_timer_;
 };

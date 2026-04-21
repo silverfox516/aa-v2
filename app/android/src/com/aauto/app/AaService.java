@@ -141,6 +141,15 @@ public class AaService extends Service implements UsbMonitor.Listener {
         }
     }
 
+    public void sendTouchEvent(int x, int y, int action) {
+        if (engineProxy == null || currentSessionId <= 0) return;
+        try {
+            engineProxy.sendTouchEvent(currentSessionId, x, y, action);
+        } catch (RemoteException e) {
+            Log.w(TAG, "sendTouchEvent failed", e);
+        }
+    }
+
     public void setSurface(Surface surface) {
         pendingSurface = surface;
 

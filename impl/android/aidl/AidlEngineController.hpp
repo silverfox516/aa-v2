@@ -6,15 +6,24 @@
 #include <com/aauto/engine/IAAEngineCallback.h>
 
 #include <binder/ParcelFileDescriptor.h>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <mutex>
+#include <thread>
+#include <vector>
 
 namespace aauto::impl {
 
 /// AIDL server: receives commands from the Java app via binder.
+///
+/// Media data (video/audio) is queued and sent on a dedicated thread
+/// to avoid blocking the engine's asio strand during Binder transfers.
 class AidlEngineController : public com::aauto::engine::BnAAEngine,
                              public engine::IEngineCallback {
 public:
     explicit AidlEngineController(engine::IEngineController* engine);
+    ~AidlEngineController();
 
     // IAAEngine (binder interface from app)
     android::binder::Status startSession(
@@ -25,6 +34,9 @@ public:
     android::binder::Status setSurface(
         int32_t sessionId,
         const android::sp<android::IBinder>& surfaceBinder) override;
+
+    android::binder::Status sendTouchEvent(
+        int32_t sessionId, int32_t x, int32_t y, int32_t action) override;
 
     android::binder::Status stopSession(int32_t sessionId) override;
     android::binder::Status stopAll() override;
@@ -49,9 +61,31 @@ public:
                        int64_t timestamp_us) override;
 
 private:
+    // Media queue item
+    struct MediaItem {
+        enum Type { Video, Audio } type;
+        int32_t session_id;
+        std::vector<uint8_t> data;
+        int64_t timestamp_us;
+        bool is_config;       // video only
+        int32_t stream_type;  // audio only
+    };
+
+    void media_sender_loop();
+
     engine::IEngineController* engine_;
+
     std::mutex callback_mutex_;
     android::sp<com::aauto::engine::IAAEngineCallback> callback_;
+
+    // Dedicated thread for Binder media callbacks (avoids blocking asio strand)
+    std::mutex media_mutex_;
+    std::condition_variable media_cv_;
+    std::deque<MediaItem> media_queue_;
+    std::atomic<bool> media_running_{true};
+    std::thread media_thread_;
+
+    static constexpr size_t kMaxMediaQueueSize = 128;
 };
 
 } // namespace aauto::impl

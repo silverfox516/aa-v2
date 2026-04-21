@@ -79,6 +79,16 @@ void Engine::set_video_surface(uint32_t session_id, void* native_window) {
     });
 }
 
+void Engine::send_touch_event(uint32_t session_id,
+                              int32_t x, int32_t y, int32_t action) {
+    asio::post(io_context_, [this, session_id, x, y, action] {
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            it->second->send_touch_event(x, y, action);
+        }
+    });
+}
+
 // ===== Lifecycle =====
 
 void Engine::run(unsigned int thread_count) {

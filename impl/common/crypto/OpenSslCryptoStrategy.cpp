@@ -177,23 +177,24 @@ void OpenSslCryptoStrategy::decrypt(const uint8_t* ciphertext, std::size_t size,
     // Feed ciphertext into read_bio
     BIO_write(read_bio_, ciphertext, static_cast<int>(size));
 
-    // Read decrypted plaintext
-    std::vector<uint8_t> plaintext(size + 256);
-    int read_bytes = SSL_read(ssl_.get(), plaintext.data(),
-                              static_cast<int>(plaintext.size()));
-    if (read_bytes <= 0) {
+    // Read all available decrypted plaintext (may span multiple TLS records)
+    std::vector<uint8_t> plaintext;
+    uint8_t buf[16384];
+    while (true) {
+        int read_bytes = SSL_read(ssl_.get(), buf, sizeof(buf));
+        if (read_bytes > 0) {
+            plaintext.insert(plaintext.end(), buf, buf + read_bytes);
+            continue;
+        }
         int err = SSL_get_error(ssl_.get(), read_bytes);
-        if (err == SSL_ERROR_WANT_READ) {
-            // Need more data, return empty
-            handler({}, {});
-            return;
+        if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_ZERO_RETURN) {
+            break;  // no more data ready
         }
         AA_LOG_E("SSL_read failed, error=%d", err);
         handler(make_error_code(AapErrc::DecryptionFailed), {});
         return;
     }
 
-    plaintext.resize(static_cast<std::size_t>(read_bytes));
     handler({}, std::move(plaintext));
 }
 

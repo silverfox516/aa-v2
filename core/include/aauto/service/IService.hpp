@@ -59,8 +59,10 @@ public:
     virtual void on_session_stop() {}
 
     /// Set a platform-native video surface. Only meaningful for video services.
-    /// Pass nullptr to detach. Default: no-op.
     virtual void set_native_window(void* /*window*/) {}
+
+    /// Send touch event. Only meaningful for input services.
+    virtual void send_touch(int32_t /*x*/, int32_t /*y*/, int32_t /*action*/) {}
 
     virtual ServiceType type() const = 0;
 

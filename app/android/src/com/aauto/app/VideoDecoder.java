@@ -1,7 +1,6 @@
 package com.aauto.app;
 
 import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.util.Log;
 import android.view.Surface;
@@ -12,18 +11,24 @@ import java.nio.ByteBuffer;
  * H.264 video decoder using Android MediaCodec.
  * Receives compressed NALUs from aa-engine daemon via AIDL callback,
  * decodes and renders to the provided Surface.
+ *
+ * Input (feedData) and output (drain) run on separate threads:
+ * - feedData: called from Binder thread, submits to decoder input queue
+ * - outputThread: continuously drains decoded frames to Surface
  */
 public class VideoDecoder {
     private static final String TAG = "AA.VideoDecoder";
     private static final String MIME_H264 = "video/avc";
     private static final int DEFAULT_WIDTH = 800;
     private static final int DEFAULT_HEIGHT = 480;
-    private static final long DEQUEUE_TIMEOUT_US = 5000;
+    private static final long INPUT_TIMEOUT_US = 5000;   // 5ms
+    private static final long OUTPUT_TIMEOUT_US = 10000;  // 10ms
 
     private MediaCodec codec;
     private Surface surface;
-    private boolean configured;
-    private final MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+    private volatile boolean configured;
+    private volatile boolean running;
+    private Thread outputThread;
     private int inputCount;
     private int outputCount;
 
@@ -41,16 +46,35 @@ public class VideoDecoder {
         }
 
         if (codec == null || !configured) return;
-        submitInputBuffer(data, timestampUs, 0);
-        drainOutputBuffers();
-        inputCount++;
-        if (inputCount % 30 == 0) {
-            Log.d(TAG, "frames: in=" + inputCount + " out=" + outputCount
-                    + " size=" + data.length);
+
+        try {
+            int idx = codec.dequeueInputBuffer(INPUT_TIMEOUT_US);
+            if (idx < 0) return;
+
+            ByteBuffer buf = codec.getInputBuffer(idx);
+            if (buf == null) return;
+
+            buf.clear();
+            buf.put(data);
+            codec.queueInputBuffer(idx, 0, data.length, timestampUs, 0);
+
+            inputCount++;
+            if (inputCount % 60 == 0) {
+                Log.i(TAG, "frames: in=" + inputCount + " out=" + outputCount
+                        + " drop=" + (inputCount - outputCount));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "feedData error", e);
         }
     }
 
     public void release() {
+        running = false;
+        if (outputThread != null) {
+            try { outputThread.join(1000); }
+            catch (InterruptedException ignored) {}
+            outputThread = null;
+        }
         if (codec != null) {
             try {
                 codec.stop();
@@ -65,9 +89,7 @@ public class VideoDecoder {
     }
 
     private void configureCodec(byte[] csd) {
-        if (codec != null) {
-            release();
-        }
+        release();
 
         try {
             MediaFormat format = MediaFormat.createVideoFormat(
@@ -78,6 +100,12 @@ public class VideoDecoder {
             codec.configure(format, surface, null, 0);
             codec.start();
             configured = true;
+
+            // Start output drain thread
+            running = true;
+            outputThread = new Thread(this::outputLoop, "VideoDecoder-output");
+            outputThread.start();
+
             Log.i(TAG, "decoder configured: " + DEFAULT_WIDTH + "x" + DEFAULT_HEIGHT);
         } catch (Exception e) {
             Log.e(TAG, "failed to configure decoder", e);
@@ -86,32 +114,26 @@ public class VideoDecoder {
         }
     }
 
-    private void submitInputBuffer(byte[] data, long timestampUs, int flags) {
-        int idx = codec.dequeueInputBuffer(DEQUEUE_TIMEOUT_US);
-        if (idx < 0) return;
+    private void outputLoop() {
+        Log.d(TAG, "output thread started");
+        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
 
-        ByteBuffer buf = codec.getInputBuffer(idx);
-        if (buf == null) return;
-
-        buf.clear();
-        buf.put(data);
-        codec.queueInputBuffer(idx, 0, data.length, timestampUs, flags);
-    }
-
-    private void drainOutputBuffers() {
-        while (true) {
-            int idx = codec.dequeueOutputBuffer(bufferInfo, 0);
-            if (idx >= 0) {
-                // Use explicit render timestamp to avoid mul-overflow in
-                // TCC803x libstagefright (ubsan: mul-overflow on timestamp*1000).
-                codec.releaseOutputBuffer(idx, System.nanoTime());
-                outputCount++;
-            } else if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                MediaFormat fmt = codec.getOutputFormat();
-                Log.i(TAG, "output format: " + fmt);
-            } else {
+        while (running && codec != null) {
+            try {
+                int idx = codec.dequeueOutputBuffer(info, OUTPUT_TIMEOUT_US);
+                if (idx >= 0) {
+                    codec.releaseOutputBuffer(idx, System.nanoTime());
+                    outputCount++;
+                } else if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    Log.i(TAG, "output format: " + codec.getOutputFormat());
+                }
+            } catch (Exception e) {
+                if (running) {
+                    Log.w(TAG, "output drain error", e);
+                }
                 break;
             }
         }
+        Log.d(TAG, "output thread exited");
     }
 }

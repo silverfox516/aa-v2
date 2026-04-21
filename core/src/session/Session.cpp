@@ -81,6 +81,12 @@ void Session::set_video_surface(void* native_window) {
     }
 }
 
+void Session::send_touch_event(int32_t x, int32_t y, int32_t action) {
+    for (auto& [ch, svc] : services_) {
+        svc->send_touch(x, y, action);
+    }
+}
+
 // ===== Send =====
 
 void Session::send_message(uint8_t channel_id, uint16_t message_type,
@@ -193,62 +199,62 @@ void Session::on_read_complete(const std::error_code& ec,
 
     auto self = shared_from_this();
     framer_.feed(read_buffer_.data(), bytes,
-        [self](const std::error_code& frame_ec, AapFrame frame) {
-            if (frame_ec) {
-                AA_LOG_E("framing error: %s", frame_ec.message().c_str());
-                self->handle_error(frame_ec);
-                return;
-            }
-            self->dispatch_frame(std::move(frame));
+        [self](AapFragment frag) {
+            self->on_fragment(std::move(frag));
         });
 
     start_read();
 }
 
-void Session::dispatch_frame(AapFrame frame) {
+void Session::on_fragment(AapFragment frag) {
+    auto& payload = channel_payloads_[frag.channel_id];
 
-    if (frame.encrypted && crypto_->is_established()) {
-        auto self = shared_from_this();
-        auto channel_id = frame.channel_id;
-
-        // Reconstruct full ciphertext: Framer stripped 2 bytes as message_type,
-        // but for encrypted frames, those bytes are part of the ciphertext.
-        std::vector<uint8_t> ciphertext;
-        ciphertext.reserve(2 + frame.payload.size());
-        ciphertext.push_back(static_cast<uint8_t>((frame.message_type >> 8) & 0xFF));
-        ciphertext.push_back(static_cast<uint8_t>(frame.message_type & 0xFF));
-        ciphertext.insert(ciphertext.end(), frame.payload.begin(), frame.payload.end());
-
-        crypto_->decrypt(ciphertext.data(), ciphertext.size(),
-            [self, channel_id](const std::error_code& ec,
-                               std::vector<uint8_t> plaintext) {
-                if (ec) {
-                    AA_LOG_E("decrypt failed: %s", ec.message().c_str());
-                    self->handle_error(make_error_code(AapErrc::DecryptionFailed));
-                    return;
-                }
-                if (plaintext.size() < 2) {
-                    self->handle_error(make_error_code(AapErrc::FramingError));
-                    return;
-                }
-                uint16_t msg_type = (static_cast<uint16_t>(plaintext[0]) << 8)
-                                  | static_cast<uint16_t>(plaintext[1]);
-                std::vector<uint8_t> payload(plaintext.begin() + 2,
-                                             plaintext.end());
-                self->dispatch_decrypted(channel_id, msg_type,
-                                         std::move(payload));
-            });
-    } else {
-        dispatch_decrypted(frame.channel_id, frame.message_type,
-                           std::move(frame.payload));
+    // FIRST resets the channel buffer
+    if (frag.is_first) {
+        payload.clear();
     }
+
+    // Decrypt per-fragment, append plaintext (matches aasdk model)
+    if (frag.encrypted && crypto_->is_established()) {
+        std::vector<uint8_t> plaintext;
+        crypto_->decrypt(frag.payload.data(), frag.payload.size(),
+            [&plaintext](const std::error_code& ec,
+                         std::vector<uint8_t> pt) {
+                if (!ec) plaintext = std::move(pt);
+            });
+        payload.insert(payload.end(), plaintext.begin(), plaintext.end());
+    } else {
+        payload.insert(payload.end(), frag.payload.begin(), frag.payload.end());
+    }
+
+    // Wait for more fragments
+    if (!frag.is_last) return;
+
+    // Complete message — extract msg_type and dispatch
+    if (payload.size() < 2) {
+        AA_LOG_E("ch %u: message too short (%zu bytes)", frag.channel_id,
+                 payload.size());
+        payload.clear();
+        return;
+    }
+
+    uint16_t msg_type = (static_cast<uint16_t>(payload[0]) << 8)
+                      | static_cast<uint16_t>(payload[1]);
+    std::vector<uint8_t> msg_payload(payload.begin() + 2, payload.end());
+    payload.clear();
+
+    dispatch_decrypted(frag.channel_id, msg_type, std::move(msg_payload));
 }
 
 void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
                                  std::vector<uint8_t> payload) {
-    AA_LOG_D("rx [%s] %s (%zu bytes) state=%s",
-             channel_name(channel_id), msg_type_name(msg_type),
-             payload.size(), to_string(state_));
+    // Suppress logging for high-frequency media data (video/audio frames)
+    bool is_media_data = (msg_type == static_cast<uint16_t>(MediaMessageType::Data));
+    if (!is_media_data) {
+        AA_LOG_D("rx [%s] %s (%zu bytes) state=%s",
+                 channel_name(channel_id), msg_type_name(msg_type),
+                 payload.size(), to_string(state_));
+    }
 
     // During handshake, Session handles VERSION and SSL messages directly.
     // After handshake (Running), ALL messages go to registered services.

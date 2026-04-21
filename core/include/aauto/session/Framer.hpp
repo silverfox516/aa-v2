@@ -5,18 +5,27 @@
 #include <cstdint>
 #include <cstddef>
 #include <functional>
-#include <map>
 #include <system_error>
 #include <vector>
 
 namespace aauto::session {
 
-/// A fully reassembled AAP frame ready for decryption and dispatch.
-struct AapFrame {
+/// A single AAP fragment as received from the wire.
+/// Framer does NOT reassemble or decrypt — caller handles both,
+/// matching the aasdk per-fragment decrypt model.
+struct AapFragment {
     uint8_t              channel_id;
+    bool                 is_first;
+    bool                 is_last;
     bool                 encrypted;
-    uint16_t             message_type;  // first 2 bytes of payload
-    std::vector<uint8_t> payload;       // full reassembled payload (after msg_type stripped)
+    std::vector<uint8_t> payload;   // raw ciphertext (or plaintext pre-SSL)
+};
+
+/// A complete reassembled + decrypted AAP message ready for dispatch.
+struct AapMessage {
+    uint8_t              channel_id;
+    uint16_t             message_type;
+    std::vector<uint8_t> payload;       // after message_type stripped
 };
 
 /// A frame to be sent on the wire.
@@ -26,52 +35,33 @@ struct OutboundFrame {
     std::vector<uint8_t> payload;       // [message_type:2][body] (encrypted or plain)
 };
 
-using FrameReceivedHandler = std::function<void(const std::error_code& ec,
-                                                AapFrame frame)>;
+using FragmentHandler = std::function<void(AapFragment fragment)>;
 
-/// AAP binary frame encoder/decoder with fragmentation support.
+/// AAP binary frame parser + encoder.
 ///
-/// Wire format per frame:
-///   Byte 0:    channel_id (uint8)
-///   Byte 1:    flags (pre-computed by Session via compute_frame_flags)
-///              bits[0-1]: FragInfo (0=continuation, 1=first, 2=last, 3=unfragmented)
-///              bit[2]:    control-on-media (control message on non-control channel)
-///              bit[3]:    encrypted flag
-///   Byte 2-3:  payload_length (uint16 big-endian)
-///   Byte 4...: payload (payload_length bytes)
+/// Receive path: parses wire bytes into individual fragments.
+/// Does NOT reassemble or decrypt — caller does both per-fragment.
 ///
-/// Encrypt-then-frame: Session encrypts the logical payload, then Framer
-/// fragments the ciphertext. On receive, Framer reassembles fragments, then
-/// Session decrypts. Framer is crypto-unaware.
+/// Send path: encodes outbound frames, fragmenting if needed.
 class Framer {
 public:
     Framer();
     ~Framer();
 
-    /// Feed raw bytes from transport. Calls on_frame for each complete frame.
+    /// Feed raw bytes from transport. Calls on_fragment for each parsed fragment.
     void feed(const uint8_t* data, std::size_t size,
-              FrameReceivedHandler on_frame);
+              FragmentHandler on_fragment);
 
     /// Encode outbound frame into wire bytes. Fragments if needed.
     std::vector<std::vector<uint8_t>> encode(const OutboundFrame& frame);
 
-    /// Reset all reassembly state.
+    /// Reset state.
     void reset();
 
 private:
-    static constexpr std::size_t kMaxReassemblySize = 512 * 1024;  // 512 KiB
-
-    struct ReassemblyContext {
-        std::vector<uint8_t> buffer;
-        bool in_progress = false;
-        bool encrypted   = false;
-    };
+    bool try_parse_fragment(FragmentHandler& on_fragment);
 
     std::vector<uint8_t> recv_buffer_;
-    std::map<uint8_t, ReassemblyContext> reassembly_;
-
-    bool try_parse_frame(FrameReceivedHandler& on_frame,
-                         std::error_code& ec);
 };
 
 } // namespace aauto::session

@@ -9,6 +9,7 @@ import android.hardware.usb.UsbManager;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.util.Log;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.WindowManager;
@@ -107,6 +108,29 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
         if (aaService != null && surfaceReady) {
             aaService.setSurface(surfaceView.getHolder().getSurface());
         }
+    }
+
+    // ===== Touch input =====
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (aaService == null) return super.onTouchEvent(event);
+
+        int action;
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:   action = 0; break;
+            case MotionEvent.ACTION_UP:     action = 1; break;
+            case MotionEvent.ACTION_MOVE:   action = 2; break;
+            case MotionEvent.ACTION_CANCEL: action = 1; break;
+            default: return super.onTouchEvent(event);
+        }
+
+        // Scale touch coordinates from display size to AA video size (800x480)
+        int x = (int) (event.getX() / surfaceView.getWidth() * 800);
+        int y = (int) (event.getY() / surfaceView.getHeight() * 480);
+
+        aaService.sendTouchEvent(x, y, action);
+        return true;
     }
 
     // ===== USB intent handling =====
