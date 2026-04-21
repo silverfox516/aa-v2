@@ -1,5 +1,6 @@
 #pragma once
 
+#include "aauto/engine/HeadunitConfig.hpp"
 #include "aauto/engine/IEngineController.hpp"
 
 #include <com/aauto/engine/BnAAEngine.h>
@@ -22,7 +23,8 @@ namespace aauto::impl {
 class AidlEngineController : public com::aauto::engine::BnAAEngine,
                              public engine::IEngineCallback {
 public:
-    explicit AidlEngineController(engine::IEngineController* engine);
+    AidlEngineController(engine::IEngineController* engine,
+                         const engine::HeadunitConfig& config);
     ~AidlEngineController();
 
     // IAAEngine (binder interface from app)
@@ -34,6 +36,7 @@ public:
     android::binder::Status setSurface(
         int32_t sessionId,
         const android::sp<android::IBinder>& surfaceBinder) override;
+
 
     android::binder::Status sendTouchEvent(
         int32_t sessionId, int32_t x, int32_t y, int32_t action) override;
@@ -74,9 +77,11 @@ private:
     void media_sender_loop();
 
     engine::IEngineController* engine_;
+    engine::HeadunitConfig hu_config_;
 
     std::mutex callback_mutex_;
     android::sp<com::aauto::engine::IAAEngineCallback> callback_;
+
 
     // Dedicated thread for Binder media callbacks (avoids blocking asio strand)
     std::mutex media_mutex_;

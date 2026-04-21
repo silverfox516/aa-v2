@@ -20,6 +20,7 @@ AndroidUsbTransport::AndroidUsbTransport(asio::any_io_executor executor,
     AA_LOG_I("USB transport created: fd=%d ep_in=0x%02x ep_out=0x%02x",
              fd_, ep_in_, ep_out_);
     read_thread_ = std::thread([this] { read_loop(); });
+    write_thread_ = std::thread([this] { write_loop(); });
 }
 
 AndroidUsbTransport::~AndroidUsbTransport() {
@@ -53,29 +54,14 @@ void AndroidUsbTransport::async_write(asio::const_buffer buffer,
         return;
     }
 
-    struct usbdevfs_bulktransfer bulk{};
-    bulk.ep = ep_out_;
-    bulk.len = static_cast<unsigned int>(buffer.size());
-    bulk.timeout = 1000;
-    bulk.data = const_cast<void*>(buffer.data());
-
-    int n = ::ioctl(fd_, USBDEVFS_BULK, &bulk);
-
-    auto exec = executor_;
-    if (n < 0) {
-        int err = errno;
-        AA_LOG_E("write failed: %s (errno=%d, ep=0x%02x, len=%u)",
-                 strerror(err), err, ep_out_, bulk.len);
-        asio::post(exec, [handler, err] {
-            handler(std::error_code(err, std::system_category()), 0);
-        });
-    } else {
-        // write complete
-        std::size_t written = static_cast<std::size_t>(n);
-        asio::post(exec, [handler, written] {
-            handler({}, written);
-        });
+    {
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        auto* p = static_cast<const uint8_t*>(buffer.data());
+        pending_write_data_.assign(p, p + buffer.size());
+        pending_write_handler_ = std::move(handler);
+        write_requested_ = true;
     }
+    write_cv_.notify_one();
 }
 
 void AndroidUsbTransport::close() {
@@ -86,30 +72,31 @@ void AndroidUsbTransport::close() {
 
     AA_LOG_I("USB transport closing");
 
-    // Wake read thread
     read_cv_.notify_one();
+    write_cv_.notify_one();
 
-    if (read_thread_.joinable()) {
-        read_thread_.join();
-    }
+    if (read_thread_.joinable()) read_thread_.join();
+    if (write_thread_.joinable()) write_thread_.join();
 
     if (fd_ >= 0) {
         ::close(fd_);
         fd_ = -1;
     }
 
-    // Cancel any pending read
-    transport::ReadHandler handler;
+    // Cancel pending handlers
     {
         std::lock_guard<std::mutex> lock(read_mutex_);
-        handler = std::move(pending_read_handler_);
-        pending_read_handler_ = nullptr;
-        read_requested_ = false;
+        if (pending_read_handler_) {
+            auto h = std::move(pending_read_handler_);
+            asio::post(executor_, [h] { h(asio::error::operation_aborted, 0); });
+        }
     }
-    if (handler) {
-        asio::post(executor_, [handler] {
-            handler(asio::error::operation_aborted, 0);
-        });
+    {
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        if (pending_write_handler_) {
+            auto h = std::move(pending_write_handler_);
+            asio::post(executor_, [h] { h(asio::error::operation_aborted, 0); });
+        }
     }
 
     AA_LOG_I("USB transport closed");
@@ -127,7 +114,6 @@ void AndroidUsbTransport::read_loop() {
     AA_LOG_D("read thread started");
 
     while (open_) {
-        // Wait for a read request
         {
             std::unique_lock<std::mutex> lock(read_mutex_);
             read_cv_.wait(lock, [this] {
@@ -136,7 +122,6 @@ void AndroidUsbTransport::read_loop() {
             if (!open_) break;
         }
 
-        // Perform blocking bulk read
         std::size_t buf_size;
         void* buf_data;
         {
@@ -155,10 +140,7 @@ void AndroidUsbTransport::read_loop() {
 
         if (n < 0) {
             int err = errno;
-            if (err == ETIMEDOUT) {
-                // Timeout is normal — retry
-                continue;
-            }
+            if (err == ETIMEDOUT) continue;
             if (!open_) break;
 
             AA_LOG_E("read ioctl failed: %s (errno=%d)", strerror(err), err);
@@ -171,14 +153,14 @@ void AndroidUsbTransport::read_loop() {
                 read_requested_ = false;
             }
             if (handler) {
-                asio::post(executor_, [handler, err] {
+                auto exec = executor_;
+                asio::post(exec, [handler, err] {
                     handler(std::error_code(err, std::system_category()), 0);
                 });
             }
             continue;
         }
 
-        // Success — deliver data
         std::size_t bytes_read = static_cast<std::size_t>(n);
         transport::ReadHandler handler;
         {
@@ -188,13 +170,67 @@ void AndroidUsbTransport::read_loop() {
             read_requested_ = false;
         }
         if (handler) {
-            asio::post(executor_, [handler, bytes_read] {
+            auto exec = executor_;
+            asio::post(exec, [handler, bytes_read] {
                 handler({}, bytes_read);
             });
         }
     }
 
     AA_LOG_D("read thread exited");
+}
+
+void AndroidUsbTransport::write_loop() {
+    AA_LOG_D("write thread started");
+
+    while (open_) {
+        std::vector<uint8_t> data;
+        {
+            std::unique_lock<std::mutex> lock(write_mutex_);
+            write_cv_.wait(lock, [this] {
+                return write_requested_ || !open_;
+            });
+            if (!open_ && !write_requested_) break;
+            data.swap(pending_write_data_);
+            write_requested_ = false;
+        }
+
+        struct usbdevfs_bulktransfer bulk{};
+        bulk.ep = ep_out_;
+        bulk.len = static_cast<unsigned int>(data.size());
+        bulk.timeout = kBulkTimeoutMs;
+        bulk.data = data.data();
+
+        int n = ::ioctl(fd_, USBDEVFS_BULK, &bulk);
+
+        transport::WriteHandler handler;
+        {
+            std::lock_guard<std::mutex> lock(write_mutex_);
+            handler = std::move(pending_write_handler_);
+            pending_write_handler_ = nullptr;
+        }
+
+        auto exec = executor_;
+        if (n < 0) {
+            int err = errno;
+            if (!open_) break;
+            AA_LOG_E("write ioctl failed: %s (errno=%d)", strerror(err), err);
+            if (handler) {
+                asio::post(exec, [handler, err] {
+                    handler(std::error_code(err, std::system_category()), 0);
+                });
+            }
+        } else {
+            std::size_t written = static_cast<std::size_t>(n);
+            if (handler) {
+                asio::post(exec, [handler, written] {
+                    handler({}, written);
+                });
+            }
+        }
+    }
+
+    AA_LOG_D("write thread exited");
 }
 
 } // namespace aauto::impl

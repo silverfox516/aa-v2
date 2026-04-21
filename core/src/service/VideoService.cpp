@@ -132,6 +132,10 @@ void VideoService::on_codec_config(const uint8_t* data, std::size_t size) {
 
 void VideoService::on_data(const uint8_t* data, std::size_t size) {
     if (!started_) return;
+    frame_count_++;
+    if (frame_count_ % 60 == 0) {
+        AA_LOG_I("daemon video frames received: %u", frame_count_);
+    }
 
     int64_t timestamp_us = 0;
     const uint8_t* frame_data = data;
@@ -179,9 +183,19 @@ void VideoService::fill_config(
     auto* sink = config->mutable_media_sink_service();
     sink->set_available_type(pb_media::shared::message::MEDIA_CODEC_VIDEO_H264_BP);
 
+    // Map width×height to protobuf resolution enum
+    auto resolution = pb_media::sink::message::VIDEO_800x480;
+    if (video_config_.width >= 2560)      resolution = pb_media::sink::message::VIDEO_2560x1440;
+    else if (video_config_.width >= 1920) resolution = pb_media::sink::message::VIDEO_1920x1080;
+    else if (video_config_.width >= 1280) resolution = pb_media::sink::message::VIDEO_1280x720;
+
+    auto frame_rate = video_config_.fps >= 60
+        ? pb_media::sink::message::VIDEO_FPS_60
+        : pb_media::sink::message::VIDEO_FPS_30;
+
     auto* vc = sink->add_video_configs();
-    vc->set_codec_resolution(pb_media::sink::message::VIDEO_800x480);
-    vc->set_frame_rate(pb_media::sink::message::VIDEO_FPS_30);
+    vc->set_codec_resolution(resolution);
+    vc->set_frame_rate(frame_rate);
     vc->set_density(video_config_.density);
     vc->set_width_margin(0);
     vc->set_height_margin(0);

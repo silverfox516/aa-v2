@@ -43,6 +43,7 @@ private:
     std::vector<std::shared_ptr<sink::IVideoSink>> sinks_;
     uint32_t max_unacked_   = 5;
     uint32_t unacked_count_ = 0;
+    uint32_t frame_count_   = 0;
     int32_t  session_id_    = 0;
     bool     started_       = false;
     sink::VideoConfig current_config_{};

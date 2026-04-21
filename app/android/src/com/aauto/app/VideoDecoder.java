@@ -19,11 +19,11 @@ import java.nio.ByteBuffer;
 public class VideoDecoder {
     private static final String TAG = "AA.VideoDecoder";
     private static final String MIME_H264 = "video/avc";
-    private static final int DEFAULT_WIDTH = 800;
-    private static final int DEFAULT_HEIGHT = 480;
     private static final long INPUT_TIMEOUT_US = 5000;   // 5ms
     private static final long OUTPUT_TIMEOUT_US = 10000;  // 10ms
 
+    private int videoWidth = 800;
+    private int videoHeight = 480;
     private MediaCodec codec;
     private Surface surface;
     private volatile boolean configured;
@@ -35,6 +35,11 @@ public class VideoDecoder {
     public void setSurface(Surface surface) {
         this.surface = surface;
         Log.i(TAG, "surface set");
+    }
+
+    public void setVideoSize(int width, int height) {
+        this.videoWidth = width;
+        this.videoHeight = height;
     }
 
     public void feedData(byte[] data, long timestampUs, boolean isConfig) {
@@ -93,7 +98,7 @@ public class VideoDecoder {
 
         try {
             MediaFormat format = MediaFormat.createVideoFormat(
-                    MIME_H264, DEFAULT_WIDTH, DEFAULT_HEIGHT);
+                    MIME_H264, videoWidth, videoHeight);
             format.setByteBuffer("csd-0", ByteBuffer.wrap(csd));
 
             codec = MediaCodec.createDecoderByType(MIME_H264);
@@ -106,7 +111,7 @@ public class VideoDecoder {
             outputThread = new Thread(this::outputLoop, "VideoDecoder-output");
             outputThread.start();
 
-            Log.i(TAG, "decoder configured: " + DEFAULT_WIDTH + "x" + DEFAULT_HEIGHT);
+            Log.i(TAG, "decoder configured: " + videoWidth + "x" + videoHeight);
         } catch (Exception e) {
             Log.e(TAG, "failed to configure decoder", e);
             codec = null;

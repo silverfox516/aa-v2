@@ -57,18 +57,14 @@ cc_library_static {
     ],
     srcs: [
         "android/transport/AndroidUsbTransport.cpp",
-        "android/sink/AMediaCodecVideoSink.cpp",
     ],
     local_include_dirs: [
         "android/transport",
-        "android/sink",
     ],
     static_libs: [
         "libaauto-core",
     ],
     shared_libs: [
-        "libmediandk",
-        "libnativewindow",
         "liblog",
     ],
     header_libs: [
@@ -76,7 +72,6 @@ cc_library_static {
     ],
     export_include_dirs: [
         "android/transport",
-        "android/sink",
     ],
 }
 

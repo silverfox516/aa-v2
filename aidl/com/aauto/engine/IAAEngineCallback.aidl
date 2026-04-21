@@ -12,6 +12,9 @@ interface IAAEngineCallback {
     /** Session error. errorCode matches AapErrc enum values. */
     void onSessionError(int sessionId, int errorCode, String message);
 
+    /** Video/display configuration for this session. Sent once at session start. */
+    void onSessionConfig(int sessionId, int videoWidth, int videoHeight);
+
     /**
      * Video data from phone (compressed H.264 NALUs).
      * App decodes via MediaCodec and renders to Surface.

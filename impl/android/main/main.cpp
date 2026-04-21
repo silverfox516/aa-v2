@@ -69,16 +69,19 @@ public:
     using AudioDataCb = std::function<void(uint32_t session_id,
         uint32_t stream_type, const uint8_t* data, std::size_t size, int64_t ts)>;
 
-    AndroidServiceFactory(VideoDataCb video_cb, AudioDataCb audio_cb)
-        : video_cb_(std::move(video_cb))
+    AndroidServiceFactory(const engine::HeadunitConfig& config,
+                          VideoDataCb video_cb, AudioDataCb audio_cb)
+        : hu_(config)
+        , video_cb_(std::move(video_cb))
         , audio_cb_(std::move(audio_cb)) {}
 
     std::map<int32_t, std::shared_ptr<service::IService>>
     create_services(service::SendMessageFn send_fn) override {
         std::map<int32_t, std::shared_ptr<service::IService>> services;
 
-        // Channel 1: Video — forward H.264 NALUs to app via callback
-        service::VideoServiceConfig vcfg{800, 480, 30, 160};
+        // Channel 1: Video — forward H.264 NALUs to app via AIDL callback
+        service::VideoServiceConfig vcfg{
+            hu_.video_width, hu_.video_height, hu_.video_fps, hu_.video_density};
         auto video_sink = std::make_shared<sink::CallbackVideoSink>(
             [this](const uint8_t* data, std::size_t size,
                    int64_t ts, bool is_config) {
@@ -105,12 +108,13 @@ public:
                 send_fn, acfg, std::move(sinks));
         };
 
-        make_audio(2, sink::AudioStreamType::Media, 48000, 16, 2);
+        make_audio(2, sink::AudioStreamType::Media,
+                   hu_.audio_sample_rate, hu_.audio_bit_depth, hu_.audio_channels);
         make_audio(3, sink::AudioStreamType::Guidance, 16000, 16, 1);
         make_audio(4, sink::AudioStreamType::System, 16000, 16, 1);
 
         // Channel 5: Input source (touchscreen)
-        service::InputServiceConfig icfg{800, 480};
+        service::InputServiceConfig icfg{hu_.video_width, hu_.video_height};
         services[5] = std::make_shared<service::InputService>(send_fn, icfg);
 
         // Channel 6: Sensor source
@@ -125,6 +129,7 @@ public:
     void set_session_id(uint32_t id) { current_session_id_ = id; }
 
 private:
+    engine::HeadunitConfig hu_;
     VideoDataCb video_cb_;
     AudioDataCb audio_cb_;
     uint32_t current_session_id_ = 0;
@@ -163,6 +168,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
 
     // Service factory with media callbacks → AIDL → app
     auto service_factory = std::make_shared<AndroidServiceFactory>(
+        hu_config,
         // Video callback
         [&aidl_raw](uint32_t sid, const uint8_t* data, std::size_t size,
                     int64_t ts, bool is_config) {
@@ -183,7 +189,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
     g_engine = &engine;
 
     android::sp<impl::AidlEngineController> aidl_controller =
-        new impl::AidlEngineController(&engine);
+        new impl::AidlEngineController(&engine, hu_config);
     aidl_raw = aidl_controller.get();
 
     android::status_t status = android::defaultServiceManager()->addService(

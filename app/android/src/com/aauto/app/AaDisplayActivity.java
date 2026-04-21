@@ -125,9 +125,10 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
             default: return super.onTouchEvent(event);
         }
 
-        // Scale touch coordinates from display size to AA video size (800x480)
-        int x = (int) (event.getX() / surfaceView.getWidth() * 800);
-        int y = (int) (event.getY() / surfaceView.getHeight() * 480);
+        int videoW = aaService.getVideoWidth();
+        int videoH = aaService.getVideoHeight();
+        int x = (int) (event.getX() / surfaceView.getWidth() * videoW);
+        int y = (int) (event.getY() / surfaceView.getHeight() * videoH);
 
         aaService.sendTouchEvent(x, y, action);
         return true;

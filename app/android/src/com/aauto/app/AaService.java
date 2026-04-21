@@ -13,6 +13,7 @@ import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
 
+
 import com.aauto.engine.IAAEngine;
 import com.aauto.engine.IAAEngineCallback;
 
@@ -29,6 +30,8 @@ public class AaService extends Service implements UsbMonitor.Listener {
     private int currentSessionId = -1;
     private int connectRetryCount = 0;
     private Surface pendingSurface;
+    private int videoWidth = 800;
+    private int videoHeight = 480;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     public class LocalBinder extends Binder {
@@ -52,6 +55,13 @@ public class AaService extends Service implements UsbMonitor.Listener {
         public void onSessionError(int sessionId, int errorCode, String message) {
             Log.e(TAG, "session " + sessionId + " error " + errorCode +
                     ": " + message);
+        }
+
+        @Override
+        public void onSessionConfig(int sessionId, int videoWidth, int videoHeight) {
+            Log.i(TAG, "session config: " + videoWidth + "x" + videoHeight);
+            AaService.this.videoWidth = videoWidth;
+            AaService.this.videoHeight = videoHeight;
         }
 
         @Override
@@ -140,6 +150,9 @@ public class AaService extends Service implements UsbMonitor.Listener {
             usbMonitor.onNewUsbDevice(device);
         }
     }
+
+    public int getVideoWidth() { return videoWidth; }
+    public int getVideoHeight() { return videoHeight; }
 
     public void sendTouchEvent(int x, int y, int action) {
         if (engineProxy == null || currentSessionId <= 0) return;

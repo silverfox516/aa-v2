@@ -7,8 +7,10 @@
 
 namespace aauto::impl {
 
-AidlEngineController::AidlEngineController(engine::IEngineController* engine)
+AidlEngineController::AidlEngineController(engine::IEngineController* engine,
+                                           const engine::HeadunitConfig& config)
     : engine_(engine)
+    , hu_config_(config)
     , media_thread_(&AidlEngineController::media_sender_loop, this) {
     engine_->register_callback(this);
 }
@@ -45,6 +47,17 @@ android::binder::Status AidlEngineController::startSession(
         return android::binder::Status::ok();
     }
     *_aidl_return = static_cast<int32_t>(sid);
+
+    // Send display config to app so it knows video dimensions
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        if (callback_ != nullptr) {
+            callback_->onSessionConfig(
+                static_cast<int32_t>(sid),
+                static_cast<int32_t>(hu_config_.video_width),
+                static_cast<int32_t>(hu_config_.video_height));
+        }
+    }
 
     return android::binder::Status::ok();
 }
@@ -122,16 +135,12 @@ void AidlEngineController::on_video_data(
         const uint8_t* data, std::size_t size,
         int64_t timestamp_us, bool is_config) {
     std::lock_guard<std::mutex> lock(media_mutex_);
-    if (media_queue_.size() >= kMaxMediaQueueSize) {
-        return;  // drop under pressure
-    }
+    if (media_queue_.size() >= kMaxMediaQueueSize) return;
     media_queue_.push_back(MediaItem{
         MediaItem::Video,
         static_cast<int32_t>(session_id),
         std::vector<uint8_t>(data, data + size),
-        timestamp_us,
-        is_config,
-        0
+        timestamp_us, is_config, 0
     });
     media_cv_.notify_one();
 }
@@ -155,7 +164,7 @@ void AidlEngineController::on_audio_data(
     media_cv_.notify_one();
 }
 
-// ===== Media sender thread — drains queue, sends via Binder =====
+// ===== Media sender thread — audio via Binder (video uses pipe directly) =====
 
 void AidlEngineController::media_sender_loop() {
     AA_LOG_I("media sender thread started");
