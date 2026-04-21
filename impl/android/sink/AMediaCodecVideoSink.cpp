@@ -15,8 +15,16 @@ AMediaCodecVideoSink::~AMediaCodecVideoSink() {
     on_stop();
 }
 
-void AMediaCodecVideoSink::set_surface(ANativeWindow* window) {
-    window_ = window;
+void AMediaCodecVideoSink::set_native_window(void* window) {
+    if (window_) {
+        ANativeWindow_release(window_);
+        window_ = nullptr;
+    }
+    if (window) {
+        window_ = static_cast<ANativeWindow*>(window);
+        ANativeWindow_acquire(window_);
+    }
+    AA_LOG_I("native window %s", window ? "attached" : "detached");
 }
 
 void AMediaCodecVideoSink::on_configure(const sink::VideoConfig& config) {

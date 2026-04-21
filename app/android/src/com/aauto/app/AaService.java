@@ -7,9 +7,11 @@ import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.Parcel;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.util.Log;
+import android.view.Surface;
 
 import com.aauto.engine.IAAEngine;
 import com.aauto.engine.IAAEngineCallback;
@@ -114,6 +116,31 @@ public class AaService extends Service implements UsbMonitor.Listener {
     public void onNewUsbDevice(UsbDevice device) {
         if (usbMonitor != null) {
             usbMonitor.onNewUsbDevice(device);
+        }
+    }
+
+    public void setSurface(Surface surface) {
+        if (engineProxy == null || currentSessionId <= 0) {
+            Log.w(TAG, "setSurface: engine not ready or no session");
+            return;
+        }
+        try {
+            // Extract IGraphicBufferProducer binder token from Surface.
+            // Surface.writeToParcel writes: name(String) + IGBP(IBinder).
+            IBinder token = null;
+            if (surface != null) {
+                Parcel p = Parcel.obtain();
+                surface.writeToParcel(p, 0);
+                p.setDataPosition(0);
+                p.readString();  // skip surface name
+                token = p.readStrongBinder();
+                p.recycle();
+            }
+            engineProxy.setSurface(currentSessionId, token);
+            Log.i(TAG, "setSurface: session=" + currentSessionId +
+                    " surface=" + (surface != null ? "attached" : "detached"));
+        } catch (RemoteException e) {
+            Log.e(TAG, "setSurface failed", e);
         }
     }
 

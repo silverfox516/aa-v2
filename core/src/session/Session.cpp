@@ -74,6 +74,13 @@ void Session::register_service(uint8_t channel_id,
     services_[channel_id] = std::move(svc);
 }
 
+void Session::set_video_surface(void* native_window) {
+    // Broadcast to all services; only VideoService overrides set_native_window.
+    for (auto& [ch, svc] : services_) {
+        svc->set_native_window(native_window);
+    }
+}
+
 // ===== Send =====
 
 void Session::send_message(uint8_t channel_id, uint16_t message_type,

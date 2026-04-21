@@ -60,6 +60,9 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
         Log.i(TAG, "surface created");
+        if (aaService != null) {
+            aaService.setSurface(holder.getSurface());
+        }
     }
 
     @Override
@@ -71,6 +74,9 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
         Log.i(TAG, "surface destroyed");
+        if (aaService != null) {
+            aaService.setSurface(null);
+        }
     }
 
     // ===== Service connection =====

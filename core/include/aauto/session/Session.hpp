@@ -60,6 +60,9 @@ public:
     void send_raw(uint8_t channel_id, uint16_t message_type,
                   const uint8_t* data, std::size_t size);
 
+    /// Forward native window to video service(s).
+    void set_video_surface(void* native_window);
+
     SessionState state() const;
     uint32_t session_id() const { return config_.session_id; }
 

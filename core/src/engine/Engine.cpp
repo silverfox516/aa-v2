@@ -69,6 +69,16 @@ void Engine::set_active_session(uint32_t session_id) {
     });
 }
 
+void Engine::set_video_surface(uint32_t session_id, void* native_window) {
+    AA_LOG_I("set_video_surface: session=%u window=%p", session_id, native_window);
+    asio::post(io_context_, [this, session_id, native_window] {
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            it->second->set_video_surface(native_window);
+        }
+    });
+}
+
 // ===== Lifecycle =====
 
 void Engine::run(unsigned int thread_count) {

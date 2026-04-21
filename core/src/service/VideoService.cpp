@@ -66,6 +66,13 @@ void VideoService::on_channel_open(uint8_t channel_id) {
     send_video_focus(true);
 }
 
+void VideoService::set_native_window(void* window) {
+    for (auto& sink : sinks_) {
+        sink->set_native_window(window);
+    }
+    AA_LOG_I("video surface %s", window ? "attached" : "detached");
+}
+
 void VideoService::on_channel_close() {
     if (started_) {
         for (auto& sink : sinks_) {

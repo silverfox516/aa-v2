@@ -31,6 +31,9 @@ class IVideoSink {
 public:
     virtual ~IVideoSink() = default;
 
+    /// Set the platform-native rendering surface (e.g., ANativeWindow*).
+    virtual void set_native_window(void* window) = 0;
+
     virtual void on_configure(const VideoConfig& config) = 0;
     virtual void on_codec_config(const uint8_t* data, std::size_t size,
                                  int64_t timestamp_us) = 0;

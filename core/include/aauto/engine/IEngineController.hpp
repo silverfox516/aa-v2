@@ -56,6 +56,11 @@ public:
     virtual void stop_session(uint32_t session_id) = 0;
     virtual void stop_all() = 0;
     virtual void set_active_session(uint32_t session_id) = 0;
+
+    /// Attach a platform-native video surface to a session.
+    /// Pass nullptr to detach. Platform layer casts to ANativeWindow* (Android)
+    /// or equivalent. Core treats it as opaque pointer.
+    virtual void set_video_surface(uint32_t session_id, void* native_window) = 0;
 };
 
 } // namespace aauto::engine

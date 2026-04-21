@@ -64,6 +64,7 @@ public:
     void stop_session(uint32_t session_id) override;
     void stop_all() override;
     void set_active_session(uint32_t session_id) override;
+    void set_video_surface(uint32_t session_id, void* native_window) override;
 
     /// Run event loop. Blocks until shutdown().
     void run(unsigned int thread_count = 1);

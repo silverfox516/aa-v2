@@ -58,6 +58,10 @@ public:
     /// Services may perform cleanup (e.g., ControlService sends ByeBye).
     virtual void on_session_stop() {}
 
+    /// Set a platform-native video surface. Only meaningful for video services.
+    /// Pass nullptr to detach. Default: no-op.
+    virtual void set_native_window(void* /*window*/) {}
+
     virtual ServiceType type() const = 0;
 
     /// Fill this service's ServiceConfiguration for ServiceDiscoveryResponse.

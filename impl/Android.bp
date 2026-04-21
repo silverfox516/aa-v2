@@ -81,6 +81,7 @@ cc_library_static {
 }
 
 // AIDL bridge: compiled without RTTI to match libbinder
+// Needs libgui for android::Surface (ANativeWindow from AIDL Surface parcel)
 cc_library_static {
     name: "libaauto-aidl-bridge",
     cpp_std: "c++17",
@@ -103,6 +104,8 @@ cc_library_static {
     shared_libs: [
         "libaauto-aidl",
         "libbinder",
+        "libgui",
+        "libnativewindow",
         "libutils",
         "liblog",
     ],
@@ -151,6 +154,7 @@ cc_binary {
         "libaapproto",
         "libprotobuf-cpp-lite-rtti",
         "libbinder",
+        "libgui",
         "libutils",
         "libssl",
         "libcrypto",

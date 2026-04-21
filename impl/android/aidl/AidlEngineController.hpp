@@ -22,6 +22,10 @@ public:
         int32_t epIn, int32_t epOut,
         int32_t* _aidl_return) override;
 
+    android::binder::Status setSurface(
+        int32_t sessionId,
+        const android::sp<android::IBinder>& surfaceBinder) override;
+
     android::binder::Status stopSession(int32_t sessionId) override;
     android::binder::Status stopAll() override;
 

@@ -28,6 +28,7 @@ public:
     ServiceType type() const override { return ServiceType::MediaSink; }
     void on_channel_open(uint8_t channel_id) override;
     void on_channel_close() override;
+    void set_native_window(void* window) override;
     void fill_config(aap_protobuf::service::ServiceConfiguration* config) override;
 
 private:

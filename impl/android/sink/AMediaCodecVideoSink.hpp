@@ -17,9 +17,7 @@ public:
     AMediaCodecVideoSink();
     ~AMediaCodecVideoSink();
 
-    /// Set the output surface. Must be called before on_configure().
-    void set_surface(ANativeWindow* window);
-
+    void set_native_window(void* window) override;
     void on_configure(const sink::VideoConfig& config) override;
     void on_codec_config(const uint8_t* data, std::size_t size,
                          int64_t timestamp_us) override;

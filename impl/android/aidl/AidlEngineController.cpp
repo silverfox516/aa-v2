@@ -3,6 +3,9 @@
 #include "AidlEngineController.hpp"
 #include "aauto/utils/Logger.hpp"
 
+#include <android/native_window.h>
+#include <gui/IGraphicBufferProducer.h>
+#include <gui/Surface.h>
 #include <unistd.h>
 
 namespace aauto::impl {
@@ -39,6 +42,28 @@ android::binder::Status AidlEngineController::startSession(
     }
     *_aidl_return = static_cast<int32_t>(sid);
 
+    return android::binder::Status::ok();
+}
+
+android::binder::Status AidlEngineController::setSurface(
+        int32_t sessionId,
+        const android::sp<android::IBinder>& surfaceBinder) {
+    ANativeWindow* window = nullptr;
+    if (surfaceBinder != nullptr) {
+        auto gbp = android::interface_cast<android::IGraphicBufferProducer>(
+            surfaceBinder);
+        if (gbp != nullptr) {
+            auto surface = new android::Surface(gbp, /*controlledByApp=*/true);
+            window = static_cast<ANativeWindow*>(surface);
+        }
+    }
+
+    AA_LOG_I("setSurface: session=%d window=%p", sessionId, window);
+    engine_->set_video_surface(static_cast<uint32_t>(sessionId), window);
+
+    if (window) {
+        ANativeWindow_release(window);
+    }
     return android::binder::Status::ok();
 }
 
