@@ -15,16 +15,11 @@ namespace aauto::impl {
 AidlEngineController::AidlEngineController(engine::IEngineController* engine,
                                            const engine::HeadunitConfig& config)
     : engine_(engine)
-    , hu_config_(config)
-    , media_thread_(&AidlEngineController::media_sender_loop, this) {
+    , hu_config_(config) {
     engine_->register_callback(this);
 }
 
-AidlEngineController::~AidlEngineController() {
-    media_running_ = false;
-    media_cv_.notify_all();
-    if (media_thread_.joinable()) media_thread_.join();
-}
+AidlEngineController::~AidlEngineController() = default;
 
 // ===== IAAEngine (binder calls from app) =====
 
@@ -190,76 +185,34 @@ void AidlEngineController::on_phone_identified(
     AA_LOG_I("phone identified: %s", device_name.c_str());
 }
 
-// ===== Media callbacks — push to queue, return immediately =====
-// These are called on the asio strand. Must not block.
+// ===== Media callbacks — direct Binder call (oneway, non-blocking) =====
+// Called on the asio strand. oneway AIDL methods return immediately
+// without waiting for the app to process, so this does not block the strand.
 
 void AidlEngineController::on_video_data(
         uint32_t session_id,
         const uint8_t* data, std::size_t size,
         int64_t timestamp_us, bool is_config) {
-    std::lock_guard<std::mutex> lock(media_mutex_);
-    if (media_queue_.size() >= kMaxMediaQueueSize) return;
-    media_queue_.push_back(MediaItem{
-        MediaItem::Video,
-        static_cast<int32_t>(session_id),
-        std::vector<uint8_t>(data, data + size),
-        timestamp_us, is_config, 0
-    });
-    media_cv_.notify_one();
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (callback_ == nullptr) return;
+    std::vector<uint8_t> vec(data, data + size);
+    callback_->onVideoData(
+        static_cast<int32_t>(session_id), vec,
+        timestamp_us, is_config);
 }
 
 void AidlEngineController::on_audio_data(
         uint32_t session_id, uint32_t stream_type,
         const uint8_t* data, std::size_t size,
         int64_t timestamp_us) {
-    std::lock_guard<std::mutex> lock(media_mutex_);
-    if (media_queue_.size() >= kMaxMediaQueueSize) {
-        return;
-    }
-    media_queue_.push_back(MediaItem{
-        MediaItem::Audio,
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (callback_ == nullptr) return;
+    std::vector<uint8_t> vec(data, data + size);
+    callback_->onAudioData(
         static_cast<int32_t>(session_id),
-        std::vector<uint8_t>(data, data + size),
-        timestamp_us,
-        false,
-        static_cast<int32_t>(stream_type)
-    });
-    media_cv_.notify_one();
+        static_cast<int32_t>(stream_type),
+        vec, timestamp_us);
 }
 
-// ===== Media sender thread — audio via Binder (video uses pipe directly) =====
-
-void AidlEngineController::media_sender_loop() {
-    AA_LOG_I("media sender thread started");
-
-    while (media_running_) {
-        std::deque<MediaItem> batch;
-        {
-            std::unique_lock<std::mutex> lock(media_mutex_);
-            media_cv_.wait(lock, [this] {
-                return !media_queue_.empty() || !media_running_;
-            });
-            if (!media_running_ && media_queue_.empty()) break;
-            batch.swap(media_queue_);
-        }
-
-        std::lock_guard<std::mutex> lock(callback_mutex_);
-        if (callback_ == nullptr) continue;
-
-        for (auto& item : batch) {
-            if (item.type == MediaItem::Video) {
-                callback_->onVideoData(
-                    item.session_id, item.data,
-                    item.timestamp_us, item.is_config);
-            } else {
-                callback_->onAudioData(
-                    item.session_id, item.stream_type,
-                    item.data, item.timestamp_us);
-            }
-        }
-    }
-
-    AA_LOG_I("media sender thread exited");
-}
 
 } // namespace aauto::impl

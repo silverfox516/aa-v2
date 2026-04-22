@@ -19,8 +19,8 @@ import java.nio.ByteBuffer;
 public class VideoDecoder {
     private static final String TAG = "AA.VideoDecoder";
     private static final String MIME_H264 = "video/avc";
-    private static final long INPUT_TIMEOUT_US = 5000;   // 5ms
-    private static final long OUTPUT_TIMEOUT_US = 10000;  // 10ms
+    private static final long INPUT_TIMEOUT_US = 1000;   // 1ms
+    private static final long OUTPUT_TIMEOUT_US = 1000;   // 1ms
 
     private int videoWidth = 800;
     private int videoHeight = 480;
@@ -93,6 +93,7 @@ public class VideoDecoder {
             MediaFormat format = MediaFormat.createVideoFormat(
                     MIME_H264, videoWidth, videoHeight);
             format.setByteBuffer("csd-0", ByteBuffer.wrap(csd));
+            format.setInteger("low-latency", 1);
 
             codec = MediaCodec.createDecoderByType(MIME_H264);
             codec.configure(format, surface, null, 0);

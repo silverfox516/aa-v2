@@ -77,13 +77,8 @@ public:
                 AA_LOG_E("invalid TCP descriptor: %s", descriptor.c_str());
                 return nullptr;
             }
-            // fd is an already-accepted TCP socket from AidlEngineController
-            asio::ip::tcp::socket socket(executor);
-            socket.assign(asio::ip::tcp::v4(), fd);
-            socket.non_blocking(true);
-            AA_LOG_I("TCP transport: fd=%d, non_blocking enabled", fd);
             return std::make_shared<impl::AndroidTcpTransport>(
-                std::move(socket));
+                executor, fd);
         }
 
         AA_LOG_E("unknown transport descriptor: %s", descriptor.c_str());

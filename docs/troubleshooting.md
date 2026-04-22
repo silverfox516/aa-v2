@@ -342,7 +342,14 @@ Additional factors:
 - MediaCodec `KEY_LOW_LATENCY` not set
 - `INPUT_TIMEOUT_US = 5ms` may cause input buffer stalls
 
-**Partial fix**: `TCP_NODELAY` on TCP socket (reduces ACK/touch event delay).
+**Fixes applied** (cumulative improvement):
+1. `TCP_NODELAY` on TCP socket (reduces ACK/touch event delay)
+2. Dedicated read/write threads for TCP transport (matching USB pattern,
+   decouples I/O from ASIO event loop)
+3. Direct oneway Binder calls (removed media queue thread hop)
+4. MediaCodec `low-latency` hint + reduced input/output timeouts (1ms)
 
-**Status**: Under investigation. Full fix may require reducing AIDL overhead
-(SharedMemory for video frames) or MediaCodec low-latency configuration.
+**Remaining**: ~200-300ms latency vs reference. Root cause is F.12
+architecture (AIDL process boundary). Reference uses JNI with native
+AMediaCodec (single process, zero-copy). Full fix requires native
+video decoding or SharedMemory for frame transfer.

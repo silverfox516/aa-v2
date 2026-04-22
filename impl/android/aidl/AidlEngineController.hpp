@@ -7,11 +7,7 @@
 #include <com/aauto/engine/IAAEngineCallback.h>
 
 #include <binder/ParcelFileDescriptor.h>
-#include <atomic>
-#include <condition_variable>
-#include <deque>
 #include <mutex>
-#include <thread>
 #include <vector>
 
 namespace aauto::impl {
@@ -63,33 +59,11 @@ public:
                        int64_t timestamp_us) override;
 
 private:
-    // Media queue item
-    struct MediaItem {
-        enum Type { Video, Audio } type;
-        int32_t session_id;
-        std::vector<uint8_t> data;
-        int64_t timestamp_us;
-        bool is_config;       // video only
-        int32_t stream_type;  // audio only
-    };
-
-    void media_sender_loop();
-
     engine::IEngineController* engine_;
     engine::HeadunitConfig hu_config_;
 
     std::mutex callback_mutex_;
     android::sp<com::aauto::engine::IAAEngineCallback> callback_;
-
-
-    // Dedicated thread for Binder media callbacks (avoids blocking asio strand)
-    std::mutex media_mutex_;
-    std::condition_variable media_cv_;
-    std::deque<MediaItem> media_queue_;
-    std::atomic<bool> media_running_{true};
-    std::thread media_thread_;
-
-    static constexpr size_t kMaxMediaQueueSize = 128;
 };
 
 } // namespace aauto::impl
