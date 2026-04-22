@@ -126,3 +126,125 @@ the entire event loop.
 
 **Fix**: Move USB write to dedicated thread (matching read thread pattern).
 Strand only handles completion callbacks.
+
+---
+
+## 9. aa-engine daemon does not start
+
+**Symptom**: `ServiceManager.getService("aa-engine")` returns null.
+AaService retries 10 times and gives up.
+
+**Root cause**: SELinux domain transition. The init.rc `seclabel` was
+missing or set to an unprivileged domain. The daemon process gets killed
+by SELinux before it can register with ServiceManager.
+
+**Fix**: Set `seclabel u:r:su:s0` in `impl/aa-engine.rc` for eng builds.
+Production builds need a proper SELinux policy with a dedicated domain.
+
+**Diagnosis**: `dmesg | grep avc` shows SELinux denials for the daemon PID.
+
+---
+
+## 10. VideoDecoder crash on disconnect (race condition)
+
+**Symptom**: `IllegalStateException` in `MediaCodec.queueInputBuffer()`
+after USB disconnect. Codec is accessed after `release()`.
+
+**Root cause**: Two threads race: the output drain thread calls
+`dequeueOutputBuffer()` while the main thread calls `release()`.
+The `configured` flag was checked after `release()` had already started.
+
+**Fix**: Set `configured = false` BEFORE calling `codec.stop()` and
+`codec.release()`. The output drain thread checks `configured` before
+every codec operation and exits immediately if false.
+
+---
+
+## 11. Activity back stack — singleTask creates separate tasks
+
+**Symptom**: AaDisplayActivity `finish()` returns to system launcher
+instead of DeviceListActivity.
+
+**Root cause**: Both activities had `launchMode="singleTask"`. Each
+singleTask activity becomes the root of its own task. When
+AaDisplayActivity finishes, its task is destroyed and the system shows
+the launcher, not DeviceListActivity's task.
+
+**Fix**: Remove `singleTask` from AaDisplayActivity (use default
+`standard` mode). Use `TaskStackBuilder` in AaService to build the
+correct back stack: DeviceListActivity → AaDisplayActivity. On
+`finish()`, the natural back stack reveals DeviceListActivity.
+
+**Key insight**: Only the app's root activity (DeviceListActivity)
+should be `singleTask`. Child activities should use standard mode so
+they stack within the same task.
+
+---
+
+## 12. Broadcast not delivered (non-protected broadcast)
+
+**Symptom**: DeviceListActivity does not update when device state
+changes. Log shows:
+```
+E ActivityManager: Sending non-protected broadcast
+    com.aauto.app.DEVICE_STATE_CHANGED from system
+```
+
+**Root cause**: On Android Automotive, apps with `persistent="true"`
+run in a system-like process context. The system enforces that
+broadcasts from system processes must be "protected" (declared in
+the platform). Custom action strings are flagged as non-protected
+and may not be delivered.
+
+**Fix**: Replace `sendBroadcast()` with a direct callback interface
+(`DeviceStateListener`). DeviceListActivity registers as listener
+when it binds to AaService. This is both more reliable and more
+efficient than broadcast.
+
+**Note**: `ACTION_SESSION_ENDED` broadcast (used by AaDisplayActivity)
+still works because AaDisplayActivity registers its receiver within
+the same process, avoiding the system broadcast check.
+
+---
+
+## 13. android.car.usb.handler intercepts USB devices
+
+**Symptom**: When a phone is connected, `android.car.usb.handler`
+launches `UsbHostManagementActivity` on top of our app. It either
+shows a device chooser dialog or crashes with NPE trying to open a
+device that already re-enumerated.
+
+**Root cause**: Android Automotive's `UsbProfileGroupSettingsManager`
+routes ALL USB attach events to `android.car.usb.handler` as the
+system's fixed USB handler. This happens regardless of our app's
+intent-filter.
+
+**Workaround**: Two options:
+1. `pm disable android.car.usb.handler` — disables the system handler
+   entirely. Simple but affects all USB device handling.
+2. Launch DeviceListActivity from `onDeviceAvailable()` with
+   `FLAG_ACTIVITY_REORDER_TO_FRONT` to reclaim foreground after the
+   system handler finishes.
+
+**Current approach**: Option 2. The system handler briefly flashes
+but our DeviceListActivity comes to foreground with the device list.
+
+**Long-term**: Register our app as the exclusive AOA handler in the
+platform's USB routing config, or build a proper `android.car.usb.handler`
+replacement that delegates AOA devices to our app.
+
+---
+
+## 14. UsbMonitor duplicate onDeviceAttached calls
+
+**Symptom**: AOA switch is attempted twice for the same device.
+Log shows two identical "non-AOA device, attempting AOA switch" entries.
+
+**Root cause**: `UsbMonitor.start()` scans already-attached devices
+via `UsbManager.getDeviceList()` AND registers a BroadcastReceiver
+for `USB_DEVICE_ATTACHED`. If the device was attached before the
+receiver was registered, both paths fire for the same device.
+
+**Fix**: Add `aoaSwitchInProgress` flag. Set it to `true` when
+starting an AOA switch, `false` when an AOA device is detected.
+Ignore non-AOA attach events while a switch is already in progress.

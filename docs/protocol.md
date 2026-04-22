@@ -257,4 +257,12 @@ causes the phone to stall or delay video start.
 
 - **ubsan mul-overflow**: `MediaCodec.releaseOutputBuffer(idx, true)` crashes in
   libstagefright. Use explicit timestamp: `releaseOutputBuffer(idx, System.nanoTime())`
-- `android.car.usb.handler` system app intercepts USB devices — may need to be disabled
+- **android.car.usb.handler**: System app intercepts ALL USB attach events via
+  `UsbProfileGroupSettingsManager` fixed handler routing. Crashes with NPE when
+  device has already re-enumerated (AOA switch). Workaround: launch our activity
+  with `FLAG_ACTIVITY_REORDER_TO_FRONT` to reclaim foreground.
+- **Non-protected broadcast**: Apps with `persistent="true"` run in system-like
+  context. Custom broadcast actions are flagged as non-protected and may not be
+  delivered. Use direct callbacks instead of `sendBroadcast()`.
+- **SELinux**: Native daemon needs `seclabel u:r:su:s0` in init.rc for eng builds.
+  Without it, the daemon is killed before registering with ServiceManager.
