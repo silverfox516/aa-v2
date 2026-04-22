@@ -15,4 +15,15 @@ android_app {
     static_libs: [
         "aauto-aidl-java",
     ],
+    required: [
+        "privapp-permissions-com.aauto.app",
+    ],
+}
+
+// Privileged permissions whitelist — installed to /etc/permissions/
+prebuilt_etc {
+    name: "privapp-permissions-com.aauto.app",
+    src: "permissions/privapp-permissions-com.aauto.app.xml",
+    sub_dir: "permissions",
+    filename_from_src: true,
 }

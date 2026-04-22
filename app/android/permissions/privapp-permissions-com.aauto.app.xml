@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<permissions>
+    <privapp-permissions package="com.aauto.app">
+        <permission name="android.permission.MANAGE_USB" />
+        <permission name="android.permission.BLUETOOTH_PRIVILEGED" />
+        <permission name="android.permission.NETWORK_STACK" />
+    </privapp-permissions>
+</permissions>

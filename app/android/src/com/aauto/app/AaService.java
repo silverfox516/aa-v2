@@ -1,8 +1,13 @@
 package com.aauto.app;
 
 import android.app.Service;
+import android.bluetooth.BluetoothAdapter;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
+import android.net.wifi.WifiManager;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
@@ -12,16 +17,25 @@ import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
 
+import com.aauto.app.wireless.BluetoothWirelessManager;
 import com.aauto.engine.IAAEngine;
 import com.aauto.engine.IAAEngineCallback;
 
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.util.Collections;
+
 /**
  * Background service bridging the Android app with aa-engine daemon.
+ * Manages both USB and wireless AA connections.
  */
-public class AaService extends Service implements UsbMonitor.Listener {
+public class AaService extends Service
+        implements UsbMonitor.Listener, BluetoothWirelessManager.Listener {
     private static final String TAG = "AA.Service";
     private static final int ENGINE_CONNECT_RETRY_MS = 2000;
     private static final int ENGINE_CONNECT_MAX_RETRIES = 10;
+    private static final int TCP_PORT = 5277;
 
     private UsbMonitor usbMonitor;
     private IAAEngine engineProxy;
@@ -32,7 +46,14 @@ public class AaService extends Service implements UsbMonitor.Listener {
     private int videoHeight = 480;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
+    // USB state
     private UsbDevice availableDevice;
+
+    // Wireless state
+    private BluetoothWirelessManager wirelessManager;
+    private String wirelessDeviceId;
+    private String wirelessDeviceName;
+    private boolean wirelessReady;
 
     public interface DeviceStateListener {
         void onDeviceStateChanged();
@@ -99,6 +120,42 @@ public class AaService extends Service implements UsbMonitor.Listener {
         }
     };
 
+    // ===== WiFi AP state receiver =====
+
+    private final BroadcastReceiver apStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            int state = intent.getIntExtra(WifiManager.EXTRA_WIFI_AP_STATE,
+                    WifiManager.WIFI_AP_STATE_FAILED);
+            if (state == WifiManager.WIFI_AP_STATE_ENABLED) {
+                Log.i(TAG, "WiFi AP enabled");
+                startWirelessListeningIfReady();
+            } else if (state == WifiManager.WIFI_AP_STATE_DISABLED) {
+                Log.i(TAG, "WiFi AP disabled");
+                stopWirelessListening();
+            }
+            notifyDeviceStateChanged();
+        }
+    };
+
+    // ===== BT state receiver =====
+
+    private final BroadcastReceiver btStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE,
+                    BluetoothAdapter.ERROR);
+            if (state == BluetoothAdapter.STATE_ON) {
+                Log.i(TAG, "Bluetooth on");
+                startWirelessListeningIfReady();
+            } else if (state == BluetoothAdapter.STATE_TURNING_OFF) {
+                Log.i(TAG, "Bluetooth turning off");
+                stopWirelessListening();
+            }
+            notifyDeviceStateChanged();
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -106,6 +163,13 @@ public class AaService extends Service implements UsbMonitor.Listener {
         connectToEngine();
         usbMonitor = new UsbMonitor(this, this);
         usbMonitor.start();
+
+        registerReceiver(apStateReceiver,
+                new IntentFilter("android.net.wifi.WIFI_AP_STATE_CHANGED"));
+        registerReceiver(btStateReceiver,
+                new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED));
+
+        startWirelessListeningIfReady();
     }
 
     @Override
@@ -114,6 +178,9 @@ public class AaService extends Service implements UsbMonitor.Listener {
         handler.removeCallbacksAndMessages(null);
         audioPlayer.release();
         usbMonitor.stop();
+        stopWirelessListening();
+        try { unregisterReceiver(apStateReceiver); } catch (Exception ignored) {}
+        try { unregisterReceiver(btStateReceiver); } catch (Exception ignored) {}
         if (engineProxy != null) {
             try { engineProxy.stopAll(); }
             catch (RemoteException e) { Log.w(TAG, "stopAll failed", e); }
@@ -135,11 +202,10 @@ public class AaService extends Service implements UsbMonitor.Listener {
 
     @Override
     public void onDeviceAvailable(UsbDevice device) {
-        Log.i(TAG, "device available: " + device.getProductName());
+        Log.i(TAG, "USB device available: " + device.getProductName());
         availableDevice = device;
         notifyDeviceStateChanged();
 
-        // Bring DeviceListActivity to foreground so user can select the device
         Intent intent = new Intent(this, DeviceListActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                 | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
@@ -152,24 +218,87 @@ public class AaService extends Service implements UsbMonitor.Listener {
             Log.e(TAG, "engine not connected, cannot start session");
             return;
         }
-
         try {
             ParcelFileDescriptor pfd = ParcelFileDescriptor.adoptFd(fd);
             currentSessionId = engineProxy.startSession(pfd, epIn, epOut);
-            Log.i(TAG, "session started: id=" + currentSessionId);
-
+            Log.i(TAG, "USB session started: id=" + currentSessionId);
             if (pendingSurface != null && currentSessionId > 0) {
                 setSurface(pendingSurface);
             }
         } catch (RemoteException e) {
-            Log.e(TAG, "failed to start session", e);
+            Log.e(TAG, "failed to start USB session", e);
         }
     }
 
     @Override
     public void onDeviceRemoved() {
-        Log.i(TAG, "device removed");
+        Log.i(TAG, "USB device removed");
         availableDevice = null;
+        if (currentSessionId > 0) {
+            if (engineProxy != null) {
+                try { engineProxy.stopSession(currentSessionId); }
+                catch (RemoteException e) { Log.w(TAG, "stopSession failed", e); }
+            }
+            cleanupSession();
+        }
+        notifyDeviceStateChanged();
+    }
+
+    // ===== BluetoothWirelessManager.Listener =====
+
+    @Override
+    public void onDeviceConnecting(String deviceId, String deviceName) {
+        Log.i(TAG, "wireless connecting: " + deviceId + " (" + deviceName + ")");
+        wirelessDeviceId = deviceId;
+        wirelessDeviceName = deviceName;
+        wirelessReady = false;
+        notifyDeviceStateChanged();
+    }
+
+    @Override
+    public void onDeviceReady(String deviceId, String deviceName) {
+        Log.i(TAG, "wireless ready: " + deviceId + " (" + deviceName + ")");
+        wirelessReady = true;
+        notifyDeviceStateChanged();
+
+        // Start TCP AAP session
+        if (engineProxy == null) {
+            Log.e(TAG, "engine not connected, cannot start wireless session");
+            return;
+        }
+        try {
+            currentSessionId = engineProxy.startTcpSession(TCP_PORT);
+            Log.i(TAG, "wireless session started: id=" + currentSessionId);
+
+            // Launch AaDisplayActivity
+            android.app.TaskStackBuilder.create(this)
+                    .addNextIntent(new Intent(this, DeviceListActivity.class))
+                    .addNextIntent(new Intent(this, AaDisplayActivity.class))
+                    .startActivities();
+
+            if (pendingSurface != null && currentSessionId > 0) {
+                setSurface(pendingSurface);
+            }
+        } catch (RemoteException e) {
+            Log.e(TAG, "failed to start wireless session", e);
+        }
+    }
+
+    @Override
+    public void onConnectionFailed(String deviceId, String reason) {
+        Log.e(TAG, "wireless connection failed: " + deviceId + " — " + reason);
+        wirelessDeviceId = null;
+        wirelessDeviceName = null;
+        wirelessReady = false;
+        notifyDeviceStateChanged();
+    }
+
+    @Override
+    public void onDeviceDisconnected(String deviceId, String reason) {
+        Log.i(TAG, "wireless disconnected: " + deviceId + " — " + reason);
+        wirelessDeviceId = null;
+        wirelessDeviceName = null;
+        wirelessReady = false;
 
         if (currentSessionId > 0) {
             if (engineProxy != null) {
@@ -178,9 +307,89 @@ public class AaService extends Service implements UsbMonitor.Listener {
             }
             cleanupSession();
         }
-
         notifyDeviceStateChanged();
     }
+
+    // ===== Wireless management =====
+
+    private void startWirelessListeningIfReady() {
+        BluetoothAdapter bt = BluetoothAdapter.getDefaultAdapter();
+        if (bt == null || !bt.isEnabled()) return;
+
+        WifiManager wm = (WifiManager) getSystemService(Context.WIFI_SERVICE);
+        if (wm.getWifiApState() != WifiManager.WIFI_AP_STATE_ENABLED) return;
+
+        BluetoothWirelessManager.HotspotConfig config = readHotspotConfig(wm);
+        if (config == null) return;
+
+        stopWirelessListening();
+        wirelessManager = new BluetoothWirelessManager(this, config);
+        wirelessManager.startListening();
+        Log.i(TAG, "wireless listening started");
+    }
+
+    private void stopWirelessListening() {
+        if (wirelessManager != null) {
+            wirelessManager.stop();
+            wirelessManager = null;
+            Log.i(TAG, "wireless listening stopped");
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private BluetoothWirelessManager.HotspotConfig readHotspotConfig(WifiManager wm) {
+        WifiConfiguration apConfig = wm.getWifiApConfiguration();
+        if (apConfig == null) {
+            Log.e(TAG, "getWifiApConfiguration() returned null");
+            return null;
+        }
+
+        String ssid = apConfig.SSID != null ? apConfig.SSID : "";
+        String password = apConfig.preSharedKey != null ? apConfig.preSharedKey : "";
+        String[] netInfo = getApNetworkInfo();
+
+        Log.i(TAG, "hotspot: ssid=" + ssid + " ip=" + netInfo[0]
+                + " bssid=" + netInfo[1] + " port=" + TCP_PORT);
+        return new BluetoothWirelessManager.HotspotConfig(
+                ssid, password, netInfo[1], netInfo[0], TCP_PORT);
+    }
+
+    private String[] getApNetworkInfo() {
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try {
+                for (NetworkInterface iface :
+                        Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                    if (iface.isLoopback() || !iface.isUp()) continue;
+                    String name = iface.getName();
+                    if (name.startsWith("wlan") || name.startsWith("ap")
+                            || name.startsWith("swlan")) {
+                        for (InetAddress addr :
+                                Collections.list(iface.getInetAddresses())) {
+                            if (addr instanceof Inet4Address
+                                    && !addr.isLoopbackAddress()) {
+                                String ip = addr.getHostAddress();
+                                byte[] mac = iface.getHardwareAddress();
+                                String bssid = "02:00:00:00:00:00";
+                                if (mac != null) {
+                                    bssid = String.format(
+                                        "%02x:%02x:%02x:%02x:%02x:%02x",
+                                        mac[0], mac[1], mac[2],
+                                        mac[3], mac[4], mac[5]);
+                                }
+                                return new String[]{ip, bssid};
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "getApNetworkInfo failed: " + e.getMessage());
+            }
+            try { Thread.sleep(500); } catch (InterruptedException ignored) { break; }
+        }
+        return new String[]{"192.168.43.1", "02:00:00:00:00:00"};
+    }
+
+    // ===== Session cleanup =====
 
     private synchronized void cleanupSession() {
         if (currentSessionId <= 0) return;
@@ -200,26 +409,44 @@ public class AaService extends Service implements UsbMonitor.Listener {
         return availableDevice;
     }
 
+    public String getWirelessDeviceName() {
+        return wirelessDeviceName;
+    }
+
+    public boolean isWirelessConnecting() {
+        return wirelessDeviceId != null && !wirelessReady;
+    }
+
+    public boolean isWirelessReady() {
+        return wirelessReady;
+    }
+
     public boolean hasActiveSession() {
         return currentSessionId > 0;
     }
 
+    public boolean isBluetoothEnabled() {
+        BluetoothAdapter bt = BluetoothAdapter.getDefaultAdapter();
+        return bt != null && bt.isEnabled();
+    }
+
+    public boolean isWifiApEnabled() {
+        WifiManager wm = (WifiManager) getSystemService(Context.WIFI_SERVICE);
+        return wm.getWifiApState() == WifiManager.WIFI_AP_STATE_ENABLED;
+    }
+
     /**
      * Connect to the available USB device and start AA session.
-     * Called when user selects the device from DeviceListActivity.
      */
     public void connectDevice() {
         if (availableDevice == null) {
             Log.w(TAG, "no available device");
             return;
         }
-
         if (!usbMonitor.connectPendingDevice()) {
             Log.e(TAG, "failed to open USB device");
             return;
         }
-
-        // Launch AaDisplayActivity
         android.app.TaskStackBuilder.create(this)
                 .addNextIntent(new Intent(this, DeviceListActivity.class))
                 .addNextIntent(new Intent(this, AaDisplayActivity.class))
@@ -240,7 +467,6 @@ public class AaService extends Service implements UsbMonitor.Listener {
 
     public void setSurface(Surface surface) {
         pendingSurface = surface;
-
         if (surface != null) {
             if (videoDecoder == null) {
                 videoDecoder = new VideoDecoder();
@@ -271,7 +497,6 @@ public class AaService extends Service implements UsbMonitor.Listener {
             }
             return;
         }
-
         engineProxy = IAAEngine.Stub.asInterface(binder);
         try {
             engineProxy.registerCallback(engineCallback);

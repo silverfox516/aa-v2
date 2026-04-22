@@ -57,6 +57,7 @@ cc_library_static {
     ],
     srcs: [
         "android/transport/AndroidUsbTransport.cpp",
+        "android/transport/AndroidTcpTransport.cpp",
     ],
     local_include_dirs: [
         "android/transport",

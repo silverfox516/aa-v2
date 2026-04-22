@@ -248,3 +248,45 @@ receiver was registered, both paths fire for the same device.
 **Fix**: Add `aoaSwitchInProgress` flag. Set it to `true` when
 starting an AOA switch, `false` when an AOA device is detected.
 Ignore non-AOA attach events while a switch is already in progress.
+
+---
+
+## 15. BT/WiFi API calls rejected — "System has not boot yet"
+
+**Symptom**: `BluetoothAdapter.enable()` throws `IllegalStateException:
+System has not boot yet` even though `sys.boot_completed` is `1`.
+`WifiManager.startSoftAp()` throws `SecurityException: NETWORK_STACK`.
+
+**Root cause**: Two issues:
+1. App ran as regular uid (10xxx) instead of system uid (1000).
+   `BluetoothManagerService.checkPackage()` has stricter checks for
+   non-system apps. Error message is misleading — not actually a boot
+   timing issue.
+2. `startSoftAp()` requires `NETWORK_STACK` signature permission, which
+   must be explicitly declared in manifest AND whitelisted in
+   `privapp-permissions-*.xml`.
+
+**Fix**:
+1. Add `android:sharedUserId="android.uid.system"` to manifest. App
+   runs as uid 1000 with full system privileges (requires `certificate:
+   "platform"` in Android.bp).
+2. Add `NETWORK_STACK` permission to manifest + privapp whitelist.
+3. Use `startSoftAp(null)` / `stopSoftAp()` instead of the removed
+   `setWifiApEnabled()`.
+
+**Note**: Reference app also uses `sharedUserId="android.uid.system"`.
+This was the key difference that caused all BT/WiFi permission failures.
+
+---
+
+## 16. Wireless AA — protocol version mismatch
+
+**Symptom**: Wireless AA TCP connection established, AAP session starts,
+but immediately fails with `protocol version mismatch`.
+
+**Root cause**: HU sends VERSION_REQUEST with v1.1, but wireless AA
+may require a higher protocol version (v1.6+) to enable wireless
+projection features.
+
+**Status**: Under investigation. The wireless transport layer (BT RFCOMM
+handshake, WiFi AP, TCP connection) is fully functional.

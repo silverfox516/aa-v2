@@ -11,6 +11,7 @@
 #include "aauto/utils/Logger.hpp"
 
 #include "../transport/AndroidUsbTransport.hpp"
+#include "../transport/AndroidTcpTransport.hpp"
 #include "../../common/crypto/OpenSslCryptoStrategy.hpp"
 #include "../aidl/AidlEngineController.hpp"
 
@@ -33,7 +34,6 @@ public:
     std::shared_ptr<transport::ITransport>
     create(asio::any_io_executor executor,
            const std::string& descriptor) override {
-        int fd = -1, ep_in = -1, ep_out = -1;
 
         auto parse_int = [&](const std::string& key) -> int {
             auto pos = descriptor.find(key + "=");
@@ -41,16 +41,41 @@ public:
             return std::stoi(descriptor.substr(pos + key.size() + 1));
         };
 
-        fd = parse_int("fd");
-        ep_in = parse_int("ep_in");
-        ep_out = parse_int("ep_out");
-
-        if (fd < 0 || ep_in < 0 || ep_out < 0) {
-            AA_LOG_E("invalid transport descriptor: %s", descriptor.c_str());
-            return nullptr;
+        if (descriptor.find("usb:") == 0) {
+            int fd = parse_int("fd");
+            int ep_in = parse_int("ep_in");
+            int ep_out = parse_int("ep_out");
+            if (fd < 0 || ep_in < 0 || ep_out < 0) {
+                AA_LOG_E("invalid USB descriptor: %s", descriptor.c_str());
+                return nullptr;
+            }
+            return std::make_shared<impl::AndroidUsbTransport>(
+                executor, fd, ep_in, ep_out);
         }
-        return std::make_shared<impl::AndroidUsbTransport>(
-            executor, fd, ep_in, ep_out);
+
+        if (descriptor.find("tcp:") == 0) {
+            int port = parse_int("port");
+            if (port <= 0) {
+                AA_LOG_E("invalid TCP descriptor: %s", descriptor.c_str());
+                return nullptr;
+            }
+            // Listen, accept one connection, return transport
+            asio::ip::tcp::acceptor acceptor(
+                executor,
+                asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port));
+            acceptor.set_option(asio::socket_base::reuse_address(true));
+            AA_LOG_I("TCP listening on port %d, waiting for phone...", port);
+
+            asio::ip::tcp::socket socket(executor);
+            acceptor.accept(socket);
+            acceptor.close();
+
+            return std::make_shared<impl::AndroidTcpTransport>(
+                std::move(socket));
+        }
+
+        AA_LOG_E("unknown transport descriptor: %s", descriptor.c_str());
+        return nullptr;
     }
 };
 

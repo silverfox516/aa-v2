@@ -63,6 +63,33 @@ android::binder::Status AidlEngineController::startSession(
 }
 
 
+android::binder::Status AidlEngineController::startTcpSession(
+        int32_t port,
+        int32_t* _aidl_return) {
+    AA_LOG_I("startTcpSession: port=%d", port);
+
+    std::string descriptor = "tcp:port=" + std::to_string(port);
+    uint32_t sid = engine_->start_session(descriptor);
+    if (sid == 0) {
+        AA_LOG_E("engine failed to start TCP session");
+        *_aidl_return = -1;
+        return android::binder::Status::ok();
+    }
+    *_aidl_return = static_cast<int32_t>(sid);
+
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        if (callback_ != nullptr) {
+            callback_->onSessionConfig(
+                static_cast<int32_t>(sid),
+                static_cast<int32_t>(hu_config_.video_width),
+                static_cast<int32_t>(hu_config_.video_height));
+        }
+    }
+
+    return android::binder::Status::ok();
+}
+
 android::binder::Status AidlEngineController::sendTouchEvent(
         int32_t sessionId, int32_t x, int32_t y, int32_t action) {
     engine_->send_touch_event(static_cast<uint32_t>(sessionId), x, y, action);

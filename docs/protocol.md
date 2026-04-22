@@ -266,3 +266,44 @@ causes the phone to stall or delay video start.
   delivered. Use direct callbacks instead of `sendBroadcast()`.
 - **SELinux**: Native daemon needs `seclabel u:r:su:s0` in init.rc for eng builds.
   Without it, the daemon is killed before registering with ServiceManager.
+- **sharedUserId**: App must use `android.uid.system` to access BT/WiFi system
+  APIs. Without it, `BluetoothManagerService` rejects calls with misleading
+  "System has not boot yet" error.
+- **NETWORK_STACK**: Required for `startSoftAp()`. Must be in both manifest
+  and `privapp-permissions-*.xml`.
+
+## 10. Wireless Android Auto (AAW)
+
+**Verified**: Samsung SM-N981N (2026-04-22) — RFCOMM + WiFi handshake OK,
+AAP version mismatch (under investigation)
+
+### Connection Sequence
+
+```
+1. User enables BT + WiFi AP on HU
+2. HU: RFCOMM server listening on AAW UUID
+3. Phone: discovers HU via BT SDP, connects RFCOMM
+4. HU → Phone:  VERSION_REQUEST (AAW, not AAP)
+5. HU → Phone:  START_REQUEST {ip, port}
+6. Phone → HU:  INFO_REQUEST
+7. HU → Phone:  INFO_RESPONSE {ssid, password, bssid, security, ap_type}
+8. Phone → HU:  CONNECTION_STATUS
+9. Phone → HU:  START_RESPONSE {status=0}
+10. Phone connects to WiFi AP → TCP port 5277
+11. AAP handshake over TCP (VERSION → SSL → AUTH) — same as USB
+```
+
+### AAW RFCOMM Protocol
+
+- **UUID**: `4DE17A00-52CB-11E6-BDF4-0800200C9A66`
+- **Frame**: `[2B length][2B msgId][protobuf payload]`
+- **Message IDs**: 1=START_REQ, 2=INFO_REQ, 3=INFO_RSP, 4=VER_REQ,
+  5=VER_RSP, 6=CONN_STATUS, 7=START_RSP
+- **TCP port**: 5277
+- **After handshake**: RFCOMM stays open as keep-alive channel
+
+### Key Facts
+- No BLE required — classic BT RFCOMM with SDP service record
+- WiFi AP must be enabled before RFCOMM listen (HU needs hotspot config)
+- Phone initiates RFCOMM connection (HU is server)
+- AAP protocol over TCP is identical to USB — transport-agnostic
