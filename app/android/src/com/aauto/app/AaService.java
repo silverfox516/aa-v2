@@ -19,6 +19,7 @@ import android.util.Log;
 import android.view.Surface;
 
 import com.aauto.app.wireless.BluetoothWirelessManager;
+import com.aauto.app.wireless.BtProfileGate;
 import com.aauto.engine.IAAEngine;
 import com.aauto.engine.IAAEngineCallback;
 
@@ -52,6 +53,7 @@ public class AaService extends Service
 
     // Wireless state
     private BluetoothWirelessManager wirelessManager;
+    private BtProfileGate btProfileGate;
     private String wirelessDeviceId;
     private String wirelessDeviceName;
     private boolean wirelessReady;
@@ -165,6 +167,8 @@ public class AaService extends Service
         usbMonitor = new UsbMonitor(this, this);
         usbMonitor.start();
 
+        btProfileGate = new BtProfileGate(this);
+
         registerReceiver(apStateReceiver,
                 new IntentFilter("android.net.wifi.WIFI_AP_STATE_CHANGED"));
         registerReceiver(btStateReceiver,
@@ -180,6 +184,10 @@ public class AaService extends Service
         audioPlayer.release();
         usbMonitor.stop();
         stopWirelessListening();
+        if (btProfileGate != null) {
+            btProfileGate.close();
+            btProfileGate = null;
+        }
         try { unregisterReceiver(apStateReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(btStateReceiver); } catch (Exception ignored) {}
         if (engineProxy != null) {
@@ -262,6 +270,11 @@ public class AaService extends Service
         wirelessReady = true;
         notifyDeviceStateChanged();
 
+        // Block A2DP/AVRCP to prevent BT media pause during wireless AA
+        if (btProfileGate != null) {
+            btProfileGate.block(deviceId);
+        }
+
         // Start TCP AAP session
         if (engineProxy == null) {
             Log.e(TAG, "engine not connected, cannot start wireless session");
@@ -297,6 +310,12 @@ public class AaService extends Service
     @Override
     public void onDeviceDisconnected(String deviceId, String reason) {
         Log.i(TAG, "wireless disconnected: " + deviceId + " — " + reason);
+
+        // Restore A2DP/AVRCP for this device
+        if (btProfileGate != null) {
+            btProfileGate.restore(deviceId);
+        }
+
         wirelessDeviceId = null;
         wirelessDeviceName = null;
         wirelessReady = false;

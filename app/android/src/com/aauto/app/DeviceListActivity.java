@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.hardware.usb.UsbDevice;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
@@ -32,10 +33,21 @@ public class DeviceListActivity extends Activity
         implements AaService.DeviceStateListener {
     private static final String TAG = "AA.DeviceList";
 
-    private static final int COLOR_ON  = 0xFF4CAF50;  // green
-    private static final int COLOR_OFF = 0xFF9E9E9E;  // gray
-    private static final int COLOR_TEXT_ON  = Color.WHITE;
-    private static final int COLOR_TEXT_OFF = Color.WHITE;
+    // Consistent design tokens
+    private static final int COLOR_BG       = 0xFF1A1A1A;
+    private static final int COLOR_PANEL    = 0xFF252525;
+    private static final int COLOR_ON       = 0xFF4CAF50;
+    private static final int COLOR_OFF      = 0xFF616161;
+    private static final int COLOR_TEXT     = 0xFFE0E0E0;
+    private static final int COLOR_TEXT_SUB = 0xFF9E9E9E;
+    private static final int TEXT_SIZE_BTN  = 16;
+    private static final int TEXT_SIZE_ITEM = 16;
+    private static final int TEXT_SIZE_SUB  = 13;
+    private static final int PAD            = 24;
+    private static final int BTN_PAD_V     = 20;
+    private static final int BTN_PAD_H     = 32;
+    private static final int ITEM_PAD_V    = 20;
+    private static final int ITEM_PAD_H    = 24;
 
     private DeviceAdapter adapter;
     private AaService aaService;
@@ -46,13 +58,16 @@ public class DeviceListActivity extends Activity
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Root: horizontal split (left=list, right=buttons)
+        // Root: horizontal split (left=list 3:1 right=buttons)
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.HORIZONTAL);
-        root.setPadding(32, 32, 32, 32);
+        root.setBackgroundColor(COLOR_BG);
+        root.setPadding(PAD, PAD, PAD, PAD);
 
         // Left panel: device list
         ListView listView = new ListView(this);
+        listView.setBackgroundColor(COLOR_PANEL);
+        listView.setDividerHeight(1);
         adapter = new DeviceAdapter();
         listView.setAdapter(adapter);
         listView.setOnItemClickListener((parent, view, position, id) -> {
@@ -69,7 +84,11 @@ public class DeviceListActivity extends Activity
         LinearLayout buttonPanel = new LinearLayout(this);
         buttonPanel.setOrientation(LinearLayout.VERTICAL);
         buttonPanel.setGravity(Gravity.CENTER);
-        buttonPanel.setPadding(32, 0, 0, 0);
+        buttonPanel.setBackgroundColor(COLOR_PANEL);
+        buttonPanel.setPadding(PAD, PAD, PAD, PAD);
+        LinearLayout.LayoutParams panelLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
+        panelLp.leftMargin = PAD;
 
         btButton = createToggleButton("BT OFF");
         btButton.setOnClickListener(v -> toggleBluetooth());
@@ -82,12 +101,10 @@ public class DeviceListActivity extends Activity
         LinearLayout.LayoutParams wifiLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        wifiLp.topMargin = 24;
+        wifiLp.topMargin = PAD;
         buttonPanel.addView(wifiApButton, wifiLp);
 
-        root.addView(buttonPanel, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-
+        root.addView(buttonPanel, panelLp);
         setContentView(root);
 
         Intent serviceIntent = new Intent(this, AaService.class);
@@ -227,15 +244,17 @@ public class DeviceListActivity extends Activity
     private Button createToggleButton(String text) {
         Button btn = new Button(this);
         btn.setText(text);
-        btn.setTextSize(16);
-        btn.setPadding(32, 24, 32, 24);
+        btn.setTextSize(TEXT_SIZE_BTN);
+        btn.setTypeface(Typeface.DEFAULT_BOLD);
+        btn.setPadding(BTN_PAD_H, BTN_PAD_V, BTN_PAD_H, BTN_PAD_V);
+        btn.setAllCaps(false);
         styleButton(btn, false);
         return btn;
     }
 
     private void styleButton(Button btn, boolean on) {
         btn.setBackgroundColor(on ? COLOR_ON : COLOR_OFF);
-        btn.setTextColor(on ? COLOR_TEXT_ON : COLOR_TEXT_OFF);
+        btn.setTextColor(Color.WHITE);
     }
 
     // ===== Service connection =====
@@ -294,19 +313,35 @@ public class DeviceListActivity extends Activity
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
-            TextView tv = (convertView instanceof TextView)
-                    ? (TextView) convertView
-                    : new TextView(parent.getContext());
-            DeviceEntry entry = entries.get(position);
-            String label = entry.type == DeviceEntry.USB ? "[USB]" : "[Wireless]";
-            String text = entry.name + "  " + label;
-            if (!entry.status.isEmpty()) {
-                text += "\n" + entry.status;
+            LinearLayout row;
+            if (convertView instanceof LinearLayout) {
+                row = (LinearLayout) convertView;
+            } else {
+                row = new LinearLayout(parent.getContext());
+                row.setOrientation(LinearLayout.VERTICAL);
+                row.setPadding(ITEM_PAD_H, ITEM_PAD_V, ITEM_PAD_H, ITEM_PAD_V);
             }
-            tv.setText(text);
-            tv.setTextSize(18);
-            tv.setPadding(16, 32, 16, 32);
-            return tv;
+            row.removeAllViews();
+
+            DeviceEntry entry = entries.get(position);
+            String label = entry.type == DeviceEntry.USB ? "USB" : "Wireless";
+
+            TextView nameView = new TextView(parent.getContext());
+            nameView.setText(entry.name);
+            nameView.setTextSize(TEXT_SIZE_ITEM);
+            nameView.setTextColor(COLOR_TEXT);
+            nameView.setTypeface(Typeface.DEFAULT_BOLD);
+            row.addView(nameView);
+
+            String sub = label;
+            if (!entry.status.isEmpty()) sub += "  -  " + entry.status;
+            TextView subView = new TextView(parent.getContext());
+            subView.setText(sub);
+            subView.setTextSize(TEXT_SIZE_SUB);
+            subView.setTextColor(COLOR_TEXT_SUB);
+            row.addView(subView);
+
+            return row;
         }
     }
 }
