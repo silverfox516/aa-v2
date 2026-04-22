@@ -102,33 +102,36 @@ HU → Phone:  ChannelOpenResponse  {status=SUCCESS}          encrypted, ch N (t
 
 ## 5. Complete Session Startup Sequence
 
-**Verified**: Samsung SM-N981N (2026-04-20)
+**Verified**: Samsung SM-N981N (2026-04-22)
 
 ```
-1.  HU → Phone:  VERSION_REQUEST (v1.1)
-2.  Phone → HU:  VERSION_RESPONSE (v1.7, status=0)
-3.  HU ↔ Phone:  SSL/TLS handshake (3 round-trips)
-4.  HU → Phone:  AUTH_COMPLETE (plaintext)
+ 1. HU �� Phone:  VERSION_REQUEST (v1.1)
+ 2. Phone → HU:  VERSION_RESPONSE (v1.7, status=0)
+ 3. HU ↔ Phone:  SSL/TLS handshake (3 round-trips)
+ 4. HU → Phone:  AUTH_COMPLETE (plaintext)
     --- encrypted from here ---
-5.  Phone → HU:  ServiceDiscoveryRequest
-6.  HU → Phone:  ServiceDiscoveryResponse (7 channels)
-7.  Phone → HU:  ChannelOpenRequest (ch 1-7, sequential)
-8.  HU → Phone:  ChannelOpenResponse (SUCCESS, per channel)
-9.  HU → Phone:  VideoFocusNotification (PROJECTED, on ch 1)
-10. HU → Phone:  DrivingStatus (UNRESTRICTED, on ch 6)
-11. Phone → HU:  AudioFocusRequest (RELEASE)
-12. HU → Phone:  AudioFocusNotification (LOSS)
-13. Phone → HU:  MediaSetup (ch 2, audio media, codec=PCM)
-14. HU → Phone:  MediaConfig (READY, max_unacked=5)
-15. Phone → HU:  MediaSetup (ch 1, video, codec=H264_BP)
-16. HU → Phone:  MediaConfig (READY, max_unacked=5)
-    ... (ch 3-4 audio guidance/system same pattern)
-17. Phone → HU:  SensorStartRequest (type=DRIVING_STATUS)
-18. HU → Phone:  DrivingStatus (UNRESTRICTED)
-19. Phone → HU:  MediaStart (ch 1, video, session_id=0)
-20. Phone → HU:  VideoFocusRequest
-21. Phone → HU:  CodecConfig (H.264 SPS/PPS, 29 bytes)
-22. Phone → HU:  MediaData (H.264 frames, continuous)
+ 5. Phone → HU:  ServiceDiscoveryRequest
+ 6. HU → Phone:  ServiceDiscoveryResponse (7 channels)
+ 7. Phone → HU:  ChannelOpenRequest (ch 1-7, sequential)
+ 8. HU → Phone:  ChannelOpenResponse (SUCCESS, per channel)
+    HU → Phone:  VideoFocusNotification (PROJECTED, on ch 1)
+    HU → Phone:  DrivingStatus (UNRESTRICTED, on ch 6)
+ 9. Phone → HU:  AudioFocusRequest (RELEASE)
+    HU → Phone:  AudioFocusNotification (LOSS)
+10. Phone → HU:  MediaSetup (audio/video channels)
+    HU → Phone:  MediaConfig (READY, max_unacked=10) per channel
+11. Phone → HU:  SensorStartRequest (DRIVING_STATUS)
+    HU → Phone:  SensorStartResponse (SUCCESS)
+    HU → Phone:  DrivingStatus (UNRESTRICTED)
+12. Phone → HU:  SensorStartRequest (NIGHT_MODE)
+    HU → Phone:  SensorStartResponse (SUCCESS)
+13. Phone → HU:  MediaStart (video, session_id=0)
+14. Phone → HU:  VideoFocusRequest
+15. Phone → HU:  CodecConfig (H.264 SPS/PPS, 29 bytes)
+    HU → Phone:  MEDIA_ACK
+16. Phone → HU:  MediaData (H.264 frames, ~30fps)
+    HU → Phone:  MEDIA_ACK (per frame, credit return)
+    --- continuous video + audio streaming ---
 ```
 
 ## 6. Media Streaming
