@@ -248,8 +248,10 @@ void Session::on_fragment(AapFragment frag) {
 
 void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
                                  std::vector<uint8_t> payload) {
-    // Suppress per-frame logs for media data (video/audio) to avoid performance hit
-    if (msg_type != static_cast<uint16_t>(MediaMessageType::Data)) {
+    // Suppress noisy per-message logs (media data, ping)
+    if (msg_type != static_cast<uint16_t>(MediaMessageType::Data)
+            && msg_type != static_cast<uint16_t>(ControlMessageType::PingRequest)
+            && msg_type != static_cast<uint16_t>(ControlMessageType::PingResponse)) {
         AA_LOG_D("rx [%s] %s (%zu bytes)",
                  channel_name(channel_id), msg_type_name(msg_type),
                  payload.size());

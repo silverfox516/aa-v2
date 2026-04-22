@@ -321,3 +321,28 @@ the daemon is started (init.rc vs manual).
 set_log_function(android_log_function);
 // Uses __android_log_vprint() with proper tag and level
 ```
+
+---
+
+## 18. Wireless AA — ~500ms input latency vs reference
+
+**Symptom**: Touch response on wireless AA is noticeably slower than the
+reference implementation (~500ms). Frame rate is fine (no drops), but the
+visual response to touch is delayed.
+
+**Root cause**: Architecture difference. Reference uses JNI with native
+AMediaCodec (single process, zero-copy). Our F.12 architecture routes
+every video frame through AIDL:
+```
+TCP → Session → VideoService → AIDL media queue → Binder → Java VideoDecoder → MediaCodec
+```
+Each frame is copied into the media queue, then serialized through Binder.
+Additional factors:
+- `TCP_NODELAY` was missing initially (Nagle buffering small ACK/touch packets)
+- MediaCodec `KEY_LOW_LATENCY` not set
+- `INPUT_TIMEOUT_US = 5ms` may cause input buffer stalls
+
+**Partial fix**: `TCP_NODELAY` on TCP socket (reduces ACK/touch event delay).
+
+**Status**: Under investigation. Full fix may require reducing AIDL overhead
+(SharedMemory for video frames) or MediaCodec low-latency configuration.

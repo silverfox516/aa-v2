@@ -83,7 +83,7 @@ public class DeviceListActivity extends Activity
         // Right panel: toggle buttons
         LinearLayout buttonPanel = new LinearLayout(this);
         buttonPanel.setOrientation(LinearLayout.VERTICAL);
-        buttonPanel.setGravity(Gravity.CENTER);
+        buttonPanel.setGravity(Gravity.TOP);
         buttonPanel.setBackgroundColor(COLOR_PANEL);
         buttonPanel.setPadding(PAD, PAD, PAD, PAD);
         LinearLayout.LayoutParams panelLp = new LinearLayout.LayoutParams(

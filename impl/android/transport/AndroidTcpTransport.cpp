@@ -7,8 +7,13 @@ namespace aauto::impl {
 
 AndroidTcpTransport::AndroidTcpTransport(asio::ip::tcp::socket socket)
     : socket_(std::move(socket)) {
+    // Disable Nagle's algorithm — AAP sends many small control messages
+    // (ACKs, touch events) that must not be delayed by TCP buffering
+    socket_.set_option(asio::ip::tcp::no_delay(true));
+
     auto ep = socket_.remote_endpoint();
-    AA_LOG_I("connected: %s:%d", ep.address().to_string().c_str(), ep.port());
+    AA_LOG_I("connected: %s:%d (TCP_NODELAY)", ep.address().to_string().c_str(),
+             ep.port());
 }
 
 AndroidTcpTransport::~AndroidTcpTransport() {
