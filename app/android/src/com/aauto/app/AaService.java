@@ -56,6 +56,7 @@ public class AaService extends Service implements UsbMonitor.Listener {
         public void onSessionError(int sessionId, int errorCode, String message) {
             Log.e(TAG, "session " + sessionId + " error " + errorCode +
                     ": " + message);
+            cleanupSession();
         }
 
         @Override
@@ -144,11 +145,23 @@ public class AaService extends Service implements UsbMonitor.Listener {
 
     @Override
     public void onDeviceDisconnected() {
+        Log.i(TAG, "device disconnected");
         if (engineProxy != null && currentSessionId > 0) {
             try { engineProxy.stopSession(currentSessionId); }
             catch (RemoteException e) { Log.w(TAG, "stopSession failed", e); }
         }
+        cleanupSession();
+    }
+
+    private synchronized void cleanupSession() {
+        if (currentSessionId <= 0) return;  // already cleaned up
         currentSessionId = -1;
+        if (videoDecoder != null) {
+            videoDecoder.release();
+            videoDecoder = null;
+        }
+        audioPlayer.release();
+        Log.i(TAG, "session cleaned up");
     }
 
     // ===== Public API for Activity =====

@@ -67,6 +67,8 @@ public class VideoDecoder {
 
     public void release() {
         running = false;
+        configured = false;  // stop feedData from using codec
+        running = false;
         if (outputThread != null) {
             try { outputThread.join(1000); }
             catch (InterruptedException ignored) {}
@@ -77,10 +79,9 @@ public class VideoDecoder {
                 codec.stop();
                 codec.release();
             } catch (Exception e) {
-                Log.w(TAG, "release error", e);
+                // expected if codec already stopped
             }
             codec = null;
-            configured = false;
         }
         Log.i(TAG, "decoder released");
     }
