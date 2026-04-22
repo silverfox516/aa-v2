@@ -7,12 +7,10 @@ import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.Parcel;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
-
 
 import com.aauto.engine.IAAEngine;
 import com.aauto.engine.IAAEngineCallback;
@@ -34,6 +32,24 @@ public class AaService extends Service implements UsbMonitor.Listener {
     private int videoHeight = 480;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
+    private UsbDevice availableDevice;
+
+    public interface DeviceStateListener {
+        void onDeviceStateChanged();
+    }
+
+    private DeviceStateListener deviceStateListener;
+
+    public void setDeviceStateListener(DeviceStateListener listener) {
+        this.deviceStateListener = listener;
+    }
+
+    private void notifyDeviceStateChanged() {
+        if (deviceStateListener != null) {
+            handler.post(() -> deviceStateListener.onDeviceStateChanged());
+        }
+    }
+
     public class LocalBinder extends Binder {
         public AaService getService() {
             return AaService.this;
@@ -44,6 +60,8 @@ public class AaService extends Service implements UsbMonitor.Listener {
 
     private VideoDecoder videoDecoder;
     private final AudioPlayer audioPlayer = new AudioPlayer();
+
+    public static final String ACTION_SESSION_ENDED = "com.aauto.app.SESSION_ENDED";
 
     private final IAAEngineCallback.Stub engineCallback =
             new IAAEngineCallback.Stub() {
@@ -116,25 +134,30 @@ public class AaService extends Service implements UsbMonitor.Listener {
     // ===== UsbMonitor.Listener =====
 
     @Override
-    public void onDeviceReady(int fd, int epIn, int epOut) {
-        // Auto-launch display activity when phone connects
-        Intent launchIntent = new Intent(this, AaDisplayActivity.class);
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-        startActivity(launchIntent);
+    public void onDeviceAvailable(UsbDevice device) {
+        Log.i(TAG, "device available: " + device.getProductName());
+        availableDevice = device;
+        notifyDeviceStateChanged();
 
+        // Bring DeviceListActivity to foreground so user can select the device
+        Intent intent = new Intent(this, DeviceListActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+        startActivity(intent);
+    }
+
+    @Override
+    public void onDeviceReady(int fd, int epIn, int epOut) {
         if (engineProxy == null) {
             Log.e(TAG, "engine not connected, cannot start session");
             return;
         }
 
         try {
-            // Wrap raw fd in ParcelFileDescriptor for binder transfer
             ParcelFileDescriptor pfd = ParcelFileDescriptor.adoptFd(fd);
             currentSessionId = engineProxy.startSession(pfd, epIn, epOut);
             Log.i(TAG, "session started: id=" + currentSessionId);
 
-            // If Surface was set before session started, send it now
             if (pendingSurface != null && currentSessionId > 0) {
                 setSurface(pendingSurface);
             }
@@ -144,32 +167,63 @@ public class AaService extends Service implements UsbMonitor.Listener {
     }
 
     @Override
-    public void onDeviceDisconnected() {
-        Log.i(TAG, "device disconnected");
-        if (engineProxy != null && currentSessionId > 0) {
-            try { engineProxy.stopSession(currentSessionId); }
-            catch (RemoteException e) { Log.w(TAG, "stopSession failed", e); }
+    public void onDeviceRemoved() {
+        Log.i(TAG, "device removed");
+        availableDevice = null;
+
+        if (currentSessionId > 0) {
+            if (engineProxy != null) {
+                try { engineProxy.stopSession(currentSessionId); }
+                catch (RemoteException e) { Log.w(TAG, "stopSession failed", e); }
+            }
+            cleanupSession();
         }
-        cleanupSession();
+
+        notifyDeviceStateChanged();
     }
 
     private synchronized void cleanupSession() {
-        if (currentSessionId <= 0) return;  // already cleaned up
+        if (currentSessionId <= 0) return;
         currentSessionId = -1;
         if (videoDecoder != null) {
             videoDecoder.release();
             videoDecoder = null;
         }
         audioPlayer.release();
+        sendBroadcast(new Intent(ACTION_SESSION_ENDED));
         Log.i(TAG, "session cleaned up");
     }
 
     // ===== Public API for Activity =====
 
-    public void onNewUsbDevice(UsbDevice device) {
-        if (usbMonitor != null) {
-            usbMonitor.onNewUsbDevice(device);
+    public UsbDevice getAvailableDevice() {
+        return availableDevice;
+    }
+
+    public boolean hasActiveSession() {
+        return currentSessionId > 0;
+    }
+
+    /**
+     * Connect to the available USB device and start AA session.
+     * Called when user selects the device from DeviceListActivity.
+     */
+    public void connectDevice() {
+        if (availableDevice == null) {
+            Log.w(TAG, "no available device");
+            return;
         }
+
+        if (!usbMonitor.connectPendingDevice()) {
+            Log.e(TAG, "failed to open USB device");
+            return;
+        }
+
+        // Launch AaDisplayActivity
+        android.app.TaskStackBuilder.create(this)
+                .addNextIntent(new Intent(this, DeviceListActivity.class))
+                .addNextIntent(new Intent(this, AaDisplayActivity.class))
+                .startActivities();
     }
 
     public int getVideoWidth() { return videoWidth; }

@@ -52,8 +52,9 @@ public class UsbMonitor {
     private static final int AOA_PID_MAX      = 0x2D05;
 
     public interface Listener {
+        void onDeviceAvailable(UsbDevice device);
         void onDeviceReady(int fd, int epIn, int epOut);
-        void onDeviceDisconnected();
+        void onDeviceRemoved();
     }
 
     private final Context context;
@@ -61,6 +62,7 @@ public class UsbMonitor {
     private final Listener listener;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private UsbDeviceConnection activeConnection;
+    private UsbDevice pendingDevice;
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override
@@ -75,8 +77,9 @@ public class UsbMonitor {
 
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
                 Log.i(TAG, "USB device detached");
+                pendingDevice = null;
                 closeConnection();
-                listener.onDeviceDisconnected();
+                listener.onDeviceRemoved();
             }
         }
     };
@@ -110,14 +113,9 @@ public class UsbMonitor {
         Log.i(TAG, "USB monitor stopped");
     }
 
-    /** Called from Activity when USB_DEVICE_ATTACHED intent arrives directly. */
-    public void onNewUsbDevice(UsbDevice device) {
-        if (device != null) {
-            onDeviceAttached(device);
-        }
-    }
-
     // ===== Internal =====
+
+    private boolean aoaSwitchInProgress;
 
     private void onDeviceAttached(UsbDevice device) {
         int vid = device.getVendorId();
@@ -126,18 +124,34 @@ public class UsbMonitor {
                 " pid=0x" + Integer.toHexString(pid));
 
         if (isAoaDevice(vid, pid)) {
-            Log.i(TAG, "AOA device detected, opening");
+            aoaSwitchInProgress = false;
+            Log.i(TAG, "AOA device detected");
             requestPermissionAndOpen(device);
         } else {
+            if (aoaSwitchInProgress) {
+                Log.i(TAG, "AOA switch already in progress, ignoring");
+                return;
+            }
+            aoaSwitchInProgress = true;
             Log.i(TAG, "non-AOA device, attempting AOA switch");
             requestPermissionAndSwitch(device);
         }
     }
 
     private void requestPermissionAndOpen(UsbDevice device) {
-        // System app with platform certificate — permission is granted
-        // automatically. Skip requestPermission() to avoid popup.
-        openAoaDevice(device);
+        // AOA device detected — don't open yet, wait for user selection
+        pendingDevice = device;
+        listener.onDeviceAvailable(device);
+    }
+
+    /** Open the pending AOA device. Called when user selects the device. */
+    public boolean connectPendingDevice() {
+        if (pendingDevice == null) {
+            Log.w(TAG, "no pending device to connect");
+            return false;
+        }
+        openAoaDevice(pendingDevice);
+        return activeConnection != null;
     }
 
     private void requestPermissionAndSwitch(UsbDevice device) {

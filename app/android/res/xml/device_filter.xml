@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Match only Google AOA devices (after AOA mode switch) -->
-    <usb-device vendor-id="6353" />  <!-- 0x18D1 = Google -->
+    <!-- Match Google AOA devices only (after AOA mode switch) -->
+    <usb-device vendor-id="6353" product-id="11520" />  <!-- 0x18D1:0x2D00 AOA -->
+    <usb-device vendor-id="6353" product-id="11521" />  <!-- 0x18D1:0x2D01 AOA + ADB -->
+    <usb-device vendor-id="6353" product-id="11522" />  <!-- 0x18D1:0x2D02 AOA + audio -->
+    <usb-device vendor-id="6353" product-id="11523" />  <!-- 0x18D1:0x2D03 AOA + audio + ADB -->
+    <usb-device vendor-id="6353" product-id="11524" />  <!-- 0x18D1:0x2D04 AOA + audio -->
+    <usb-device vendor-id="6353" product-id="11525" />  <!-- 0x18D1:0x2D05 AOA + audio + ADB -->
 </resources>

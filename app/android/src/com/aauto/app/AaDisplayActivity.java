@@ -2,10 +2,11 @@ package com.aauto.app;
 
 import android.app.Activity;
 import android.content.ComponentName;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
-import android.hardware.usb.UsbDevice;
-import android.hardware.usb.UsbManager;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.util.Log;
@@ -23,7 +24,6 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
 
     private SurfaceView surfaceView;
     private AaService aaService;
-    private UsbDevice pendingDevice;
     private boolean surfaceReady;
 
     @Override
@@ -37,25 +37,28 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
         surfaceView.getHolder().addCallback(this);
 
         Intent serviceIntent = new Intent(this, AaService.class);
-        startService(serviceIntent);
         bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE);
 
-        handleUsbIntent(getIntent());
+        registerReceiver(sessionEndReceiver,
+                new IntentFilter(AaService.ACTION_SESSION_ENDED));
 
         Log.i(TAG, "AaDisplayActivity created");
     }
 
     @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        handleUsbIntent(intent);
-    }
-
-    @Override
     protected void onDestroy() {
+        try { unregisterReceiver(sessionEndReceiver); } catch (Exception ignored) {}
         unbindService(serviceConnection);
         super.onDestroy();
     }
+
+    private final BroadcastReceiver sessionEndReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.i(TAG, "session ended, finishing");
+            finish();
+        }
+    };
 
     // ===== SurfaceHolder.Callback =====
 
@@ -90,11 +93,6 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
             aaService = localBinder.getService();
             Log.i(TAG, "AaService bound");
             trySendSurface();
-
-            if (pendingDevice != null) {
-                aaService.onNewUsbDevice(pendingDevice);
-                pendingDevice = null;
-            }
         }
 
         @Override
@@ -134,24 +132,4 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
         return true;
     }
 
-    // ===== USB intent handling =====
-
-    private void handleUsbIntent(Intent intent) {
-        if (intent == null) return;
-
-        if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(intent.getAction())) {
-            UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-            if (device == null) return;
-
-            Log.i(TAG, "USB device intent: vid=0x" +
-                    Integer.toHexString(device.getVendorId()));
-
-            if (aaService != null) {
-                aaService.onNewUsbDevice(device);
-            } else {
-                pendingDevice = device;
-                Log.i(TAG, "service not ready, device queued");
-            }
-        }
-    }
 }
