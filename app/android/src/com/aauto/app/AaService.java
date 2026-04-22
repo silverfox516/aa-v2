@@ -43,6 +43,7 @@ public class AaService extends Service implements UsbMonitor.Listener {
     private final LocalBinder binder = new LocalBinder();
 
     private VideoDecoder videoDecoder;
+    private final AudioPlayer audioPlayer = new AudioPlayer();
 
     private final IAAEngineCallback.Stub engineCallback =
             new IAAEngineCallback.Stub() {
@@ -75,7 +76,7 @@ public class AaService extends Service implements UsbMonitor.Listener {
         @Override
         public void onAudioData(int sessionId, int streamType, byte[] data,
                                 long timestampUs) {
-            // TODO: audio playback via AudioTrack
+            audioPlayer.feedData(streamType, data);
         }
     };
 
@@ -92,6 +93,7 @@ public class AaService extends Service implements UsbMonitor.Listener {
     public void onDestroy() {
         Log.i(TAG, "AaService destroying");
         handler.removeCallbacksAndMessages(null);
+        audioPlayer.release();
         usbMonitor.stop();
         if (engineProxy != null) {
             try { engineProxy.stopAll(); }
@@ -114,6 +116,12 @@ public class AaService extends Service implements UsbMonitor.Listener {
 
     @Override
     public void onDeviceReady(int fd, int epIn, int epOut) {
+        // Auto-launch display activity when phone connects
+        Intent launchIntent = new Intent(this, AaDisplayActivity.class);
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+        startActivity(launchIntent);
+
         if (engineProxy == null) {
             Log.e(TAG, "engine not connected, cannot start session");
             return;

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Match only Google AOA devices (after AOA mode switch) -->
+    <usb-device vendor-id="6353" />  <!-- 0x18D1 = Google -->
+</resources>

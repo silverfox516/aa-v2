@@ -5,8 +5,8 @@
     <uses-feature android:name="android.hardware.usb.host" android:required="true" />
     <!-- System-level USB access without user permission dialog -->
     <uses-permission android:name="android.permission.MANAGE_USB" />
-
     <application
+        android:name=".AaApplication"
         android:label="Android Auto"
         android:persistent="true">
 
@@ -21,8 +21,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- USB detection handled by UsbMonitor (runtime BroadcastReceiver).
-                 No manifest intent-filter to avoid "open with" system dialog. -->
+            <!-- Auto-launch for AOA devices only (Google VID 0x18D1) -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
         </activity>
 
         <service
