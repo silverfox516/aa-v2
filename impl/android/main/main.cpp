@@ -19,6 +19,7 @@
 #include <binder/IServiceManager.h>
 #include <binder/ProcessState.h>
 
+#include <android/log.h>
 #include <csignal>
 #include <memory>
 #include <thread>
@@ -27,7 +28,24 @@ using namespace aauto;
 
 namespace {
 
+void android_log_function(LogLevel level, const char* tag,
+                          const char* fmt, va_list args) {
+    int prio;
+    switch (level) {
+        case LogLevel::Debug: prio = ANDROID_LOG_DEBUG; break;
+        case LogLevel::Info:  prio = ANDROID_LOG_INFO;  break;
+        case LogLevel::Warn:  prio = ANDROID_LOG_WARN;  break;
+        case LogLevel::Error: prio = ANDROID_LOG_ERROR; break;
+        default:              prio = ANDROID_LOG_INFO;   break;
+    }
+    __android_log_vprint(prio, tag, fmt, args);
+}
+
+} // anonymous namespace
+
 // ===== Factory implementations =====
+
+namespace {
 
 class AndroidTransportFactory : public engine::ITransportFactory {
 public:
@@ -54,22 +72,16 @@ public:
         }
 
         if (descriptor.find("tcp:") == 0) {
-            int port = parse_int("port");
-            if (port <= 0) {
+            int fd = parse_int("fd");
+            if (fd < 0) {
                 AA_LOG_E("invalid TCP descriptor: %s", descriptor.c_str());
                 return nullptr;
             }
-            // Listen, accept one connection, return transport
-            asio::ip::tcp::acceptor acceptor(
-                executor,
-                asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port));
-            acceptor.set_option(asio::socket_base::reuse_address(true));
-            AA_LOG_I("TCP listening on port %d, waiting for phone...", port);
-
+            // fd is an already-accepted TCP socket from AidlEngineController
             asio::ip::tcp::socket socket(executor);
-            acceptor.accept(socket);
-            acceptor.close();
-
+            socket.assign(asio::ip::tcp::v4(), fd);
+            socket.non_blocking(true);
+            AA_LOG_I("TCP transport: fd=%d, non_blocking enabled", fd);
             return std::make_shared<impl::AndroidTcpTransport>(
                 std::move(socket));
         }
@@ -172,6 +184,7 @@ void signal_handler(int sig) {
 } // anonymous namespace
 
 int main(int /*argc*/, char* /*argv*/[]) {
+    set_log_function(android_log_function);
     AA_LOG_I("aa-engine daemon starting");
 
     android::sp<android::ProcessState> ps = android::ProcessState::self();

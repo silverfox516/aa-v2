@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
+import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
 import android.os.Binder;
 import android.os.Handler;
@@ -394,12 +395,16 @@ public class AaService extends Service
     private synchronized void cleanupSession() {
         if (currentSessionId <= 0) return;
         currentSessionId = -1;
+        wirelessDeviceId = null;
+        wirelessDeviceName = null;
+        wirelessReady = false;
         if (videoDecoder != null) {
             videoDecoder.release();
             videoDecoder = null;
         }
         audioPlayer.release();
         sendBroadcast(new Intent(ACTION_SESSION_ENDED));
+        notifyDeviceStateChanged();
         Log.i(TAG, "session cleaned up");
     }
 

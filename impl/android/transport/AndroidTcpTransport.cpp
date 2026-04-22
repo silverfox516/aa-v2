@@ -25,12 +25,15 @@ void AndroidTcpTransport::async_read(asio::mutable_buffer buffer,
         return;
     }
 
-    asio::async_read(socket_, buffer,
+    AA_LOG_D("async_read_some: up to %zu bytes", asio::buffer_size(buffer));
+    socket_.async_read_some(buffer,
         [this, h = std::move(handler)](const std::error_code& ec,
                                        std::size_t bytes) {
             if (ec) {
-                AA_LOG_D("read error: %s", ec.message().c_str());
+                AA_LOG_W("read error: %s", ec.message().c_str());
                 open_ = false;
+            } else {
+                AA_LOG_D("read: %zu bytes", bytes);
             }
             h(ec, bytes);
         });
@@ -46,12 +49,16 @@ void AndroidTcpTransport::async_write(asio::const_buffer buffer,
         return;
     }
 
+    auto size = asio::buffer_size(buffer);
+    AA_LOG_D("async_write: %zu bytes", size);
     asio::async_write(socket_, buffer,
         [this, h = std::move(handler)](const std::error_code& ec,
                                        std::size_t bytes) {
             if (ec) {
-                AA_LOG_D("write error: %s", ec.message().c_str());
+                AA_LOG_W("write error: %s", ec.message().c_str());
                 open_ = false;
+            } else {
+                AA_LOG_D("write complete: %zu bytes", bytes);
             }
             h(ec, bytes);
         });

@@ -279,14 +279,45 @@ This was the key difference that caused all BT/WiFi permission failures.
 
 ---
 
-## 16. Wireless AA — protocol version mismatch
+## 16. Wireless AA — version exchange timeout (not version mismatch)
 
 **Symptom**: Wireless AA TCP connection established, AAP session starts,
-but immediately fails with `protocol version mismatch`.
+VERSION_REQUEST is sent successfully (10 bytes written), but times out
+after 5 seconds with "protocol version mismatch" (misleading error name
+from state timeout handler).
 
-**Root cause**: HU sends VERSION_REQUEST with v1.1, but wireless AA
-may require a higher protocol version (v1.6+) to enable wireless
-projection features.
+**Root cause**: Two issues:
+1. **`asio::async_read` vs `async_read_some`**: `asio::async_read(socket, buffer)`
+   is a composed operation that waits until the ENTIRE buffer (16384 bytes) is
+   filled. Phone sends VERSION_RESPONSE (~12 bytes) but the read never completes
+   because it waits for 16384 bytes total. Fix: use `socket.async_read_some(buffer)`
+   which returns as soon as any data arrives.
+2. **TCP accept blocking io_context**: Initial implementation called `accept()`
+   inside TransportFactory which runs on the io_context thread. This blocked the
+   entire event loop during the 3-4 second WiFi connection delay. Fix: moved
+   accept to Binder thread in AidlEngineController, pass accepted fd via descriptor.
 
-**Status**: Under investigation. The wireless transport layer (BT RFCOMM
-handshake, WiFi AP, TCP connection) is fully functional.
+**Fix**:
+- AndroidTcpTransport: `async_read` → `socket_.async_read_some`
+- AidlEngineController: TCP accept on Binder thread, descriptor `"tcp:fd=N"`
+- TransportFactory: assign pre-accepted fd, set `non_blocking(true)`
+
+**Why USB wasn't affected**: USB transport uses dedicated threads with blocking
+ioctl reads that return whatever data is available — equivalent to `read_some`.
+
+---
+
+## 17. Native daemon logs not visible in logcat
+
+**Symptom**: aa-engine daemon logs (Session, Transport, Service) not
+appearing in `logcat | grep AA`.
+
+**Root cause**: Default `log_impl()` writes to `stderr` via `fprintf`.
+On Android, `stderr` may not be redirected to logcat depending on how
+the daemon is started (init.rc vs manual).
+
+**Fix**: Register Android-native log function in `main()`:
+```cpp
+set_log_function(android_log_function);
+// Uses __android_log_vprint() with proper tag and level
+```

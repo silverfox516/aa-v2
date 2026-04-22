@@ -274,8 +274,8 @@ causes the phone to stall or delay video start.
 
 ## 10. Wireless Android Auto (AAW)
 
-**Verified**: Samsung SM-N981N (2026-04-22) — RFCOMM + WiFi handshake OK,
-AAP version mismatch (under investigation)
+**Verified**: Samsung SM-N981N (2026-04-22) — full wireless session including
+video streaming confirmed
 
 ### Connection Sequence
 

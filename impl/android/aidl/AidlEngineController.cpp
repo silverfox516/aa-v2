@@ -4,6 +4,11 @@
 #include "aauto/utils/Logger.hpp"
 
 #include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <cerrno>
+#include <cstring>
 
 namespace aauto::impl {
 
@@ -68,9 +73,46 @@ android::binder::Status AidlEngineController::startTcpSession(
         int32_t* _aidl_return) {
     AA_LOG_I("startTcpSession: port=%d", port);
 
-    std::string descriptor = "tcp:port=" + std::to_string(port);
+    // Accept TCP connection on Binder thread (not io_context) to avoid
+    // blocking the engine event loop while waiting for phone WiFi connect.
+    int accepted_fd = -1;
+    {
+        int server_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (server_fd < 0) {
+            AA_LOG_E("TCP socket() failed: %s", strerror(errno));
+            *_aidl_return = -1;
+            return android::binder::Status::ok();
+        }
+        int opt = 1;
+        ::setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+        struct sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(port);
+        if (::bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            AA_LOG_E("TCP bind(%d) failed: %s", port, strerror(errno));
+            ::close(server_fd);
+            *_aidl_return = -1;
+            return android::binder::Status::ok();
+        }
+        ::listen(server_fd, 1);
+        AA_LOG_I("TCP listening on port %d, waiting for phone...", port);
+
+        accepted_fd = ::accept(server_fd, nullptr, nullptr);
+        ::close(server_fd);
+        if (accepted_fd < 0) {
+            AA_LOG_E("TCP accept failed: %s", strerror(errno));
+            *_aidl_return = -1;
+            return android::binder::Status::ok();
+        }
+        AA_LOG_I("TCP accepted: fd=%d", accepted_fd);
+    }
+
+    std::string descriptor = "tcp:fd=" + std::to_string(accepted_fd);
     uint32_t sid = engine_->start_session(descriptor);
     if (sid == 0) {
+        ::close(accepted_fd);
         AA_LOG_E("engine failed to start TCP session");
         *_aidl_return = -1;
         return android::binder::Status::ok();
