@@ -51,6 +51,7 @@ bool InboundMessageAssembler::append_fragment_payload(
                 plaintext = std::move(pt);
             });
         if (!decrypt_ok) {
+            channel_payload.clear();
             return false;
         }
         channel_payload.insert(channel_payload.end(),

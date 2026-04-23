@@ -29,20 +29,28 @@ Session::Session(asio::any_io_executor executor,
     , transport_(std::move(transport))
     , crypto_(std::move(crypto))
     , observer_(observer)
+    // Wrap all callbacks with bind_executor(strand_) to ensure crypto
+    // async callbacks re-enter on the strand, preventing data races.
     , outbound_encoder_(
         crypto_,
-        [this](const std::error_code& ec) { handle_error(ec); },
-        [this](std::vector<uint8_t> wire) { enqueue_write(std::move(wire)); })
+        asio::bind_executor(strand_,
+            [this](const std::error_code& ec) { handle_error(ec); }),
+        asio::bind_executor(strand_,
+            [this](std::vector<uint8_t> wire) { enqueue_write(std::move(wire)); }))
     , inbound_assembler_(
         crypto_,
-        [this](const std::error_code& ec) { handle_error(ec); })
+        asio::bind_executor(strand_,
+            [this](const std::error_code& ec) { handle_error(ec); }))
     , handshake_coordinator_(
         crypto_,
-        [this](uint16_t type, const std::vector<uint8_t>& payload) {
-            send_message(kControlChannelId, type, payload);
-        },
-        [this] { on_ssl_complete(); },
-        [this](const std::error_code& ec) { handle_error(ec); })
+        asio::bind_executor(strand_,
+            [this](uint16_t type, const std::vector<uint8_t>& payload) {
+                send_message(kControlChannelId, type, payload);
+            }),
+        asio::bind_executor(strand_,
+            [this] { on_ssl_complete(); }),
+        asio::bind_executor(strand_,
+            [this](const std::error_code& ec) { handle_error(ec); }))
     , state_timer_(strand_) {
     read_buffer_.fill(0);
 }
@@ -322,10 +330,8 @@ void Session::begin_disconnect() {
 }
 
 void Session::send_version_request() {
-    // VERSION_REQUEST payload is raw bytes, not protobuf:
-    // [major:2 BE][minor:2 BE]
-    // VERSION_REQUEST payload: [major:2 BE][minor:2 BE]
-    // Use v1.1 — matches reference headunit. Phone responds with its version.
+    // VERSION_REQUEST payload: raw bytes [major:2 BE][minor:2 BE], not protobuf.
+    // v1.1 — matches reference headunit. Phone responds with its version.
     std::vector<uint8_t> payload = {0, 1, 0, 1};
     send_message(kControlChannelId,
         static_cast<uint16_t>(ControlMessageType::VersionRequest),
@@ -337,16 +343,6 @@ void Session::on_version_response(const std::vector<uint8_t>& payload) {
     transition_to(SessionState::SslHandshake);
     start_state_timer(config_.ssl_handshake_timeout_ms);
     handshake_coordinator_.on_version_response(payload);
-}
-
-void Session::begin_ssl_handshake() {
-    handshake_coordinator_.begin_ssl_handshake();
-}
-
-void Session::on_ssl_data_received(const uint8_t* data, std::size_t size) {
-    if (state_ != SessionState::SslHandshake) return;
-
-    handshake_coordinator_.on_ssl_data_received(data, size);
 }
 
 void Session::on_ssl_complete() {

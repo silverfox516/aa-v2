@@ -2,6 +2,8 @@ package com.aauto.app;
 
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import com.aauto.app.wireless.BluetoothWirelessManager;
@@ -11,28 +13,46 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.util.Collections;
 
+/**
+ * Reads WiFi AP configuration and network interface info.
+ * Network info discovery runs on a background thread to avoid ANR.
+ */
 class HotspotConfigProvider {
     private static final String TAG = "AA.HotspotConfig";
+    private static final int MAX_RETRIES = 5;
+    private static final int RETRY_DELAY_MS = 500;
 
-    BluetoothWirelessManager.HotspotConfig read(WifiManager wm, int tcpPort) {
+    interface Callback {
+        void onConfigReady(BluetoothWirelessManager.HotspotConfig config);
+    }
+
+    @SuppressWarnings("deprecation")
+    void readAsync(WifiManager wm, int tcpPort, Callback callback) {
         WifiConfiguration apConfig = wm.getWifiApConfiguration();
         if (apConfig == null) {
             Log.e(TAG, "getWifiApConfiguration() returned null");
-            return null;
+            callback.onConfigReady(null);
+            return;
         }
 
         String ssid = apConfig.SSID != null ? apConfig.SSID : "";
         String password = apConfig.preSharedKey != null ? apConfig.preSharedKey : "";
-        String[] netInfo = getApNetworkInfo();
 
-        Log.i(TAG, "hotspot: ssid=" + ssid + " ip=" + netInfo[0]
-                + " bssid=" + netInfo[1] + " port=" + tcpPort);
-        return new BluetoothWirelessManager.HotspotConfig(
-                ssid, password, netInfo[1], netInfo[0], tcpPort);
+        // Discover AP network info on background thread to avoid ANR
+        new Thread(() -> {
+            String[] netInfo = getApNetworkInfo();
+            Log.i(TAG, "hotspot: ssid=" + ssid + " ip=" + netInfo[0]
+                    + " bssid=" + netInfo[1] + " port=" + tcpPort);
+            BluetoothWirelessManager.HotspotConfig config =
+                    new BluetoothWirelessManager.HotspotConfig(
+                            ssid, password, netInfo[1], netInfo[0], tcpPort);
+            new Handler(Looper.getMainLooper()).post(() ->
+                    callback.onConfigReady(config));
+        }, "HotspotConfig").start();
     }
 
     private String[] getApNetworkInfo() {
-        for (int attempt = 0; attempt < 5; attempt++) {
+        for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
             try {
                 for (NetworkInterface iface :
                         Collections.list(NetworkInterface.getNetworkInterfaces())) {
@@ -62,7 +82,7 @@ class HotspotConfigProvider {
                 Log.w(TAG, "getApNetworkInfo failed: " + e.getMessage());
             }
             try {
-                Thread.sleep(500);
+                Thread.sleep(RETRY_DELAY_MS);
             } catch (InterruptedException ignored) {
                 break;
             }

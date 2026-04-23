@@ -21,6 +21,7 @@ class SessionLifecycleController {
     private final Callback callback;
 
     private int currentSessionId = -1;
+    private boolean isWirelessSession;
 
     SessionLifecycleController(Context context,
                                WirelessStateTracker wirelessStateTracker,
@@ -48,6 +49,7 @@ class SessionLifecycleController {
         try {
             ParcelFileDescriptor pfd = ParcelFileDescriptor.adoptFd(fd);
             currentSessionId = engineProxy.startSession(pfd, epIn, epOut);
+            isWirelessSession = false;
             Log.i(TAG, "USB session started: id=" + currentSessionId);
             if (currentSessionId > 0) {
                 playbackController.attachPendingSurfaceIfNeeded();
@@ -65,6 +67,7 @@ class SessionLifecycleController {
         }
         try {
             currentSessionId = engineProxy.startTcpSession(tcpPort);
+            isWirelessSession = true;
             Log.i(TAG, "wireless session started: id=" + currentSessionId);
             if (currentSessionId > 0) {
                 playbackController.attachPendingSurfaceIfNeeded();
@@ -89,7 +92,10 @@ class SessionLifecycleController {
     void cleanupSession() {
         if (currentSessionId <= 0) return;
         currentSessionId = -1;
-        wirelessStateTracker.clear();
+        if (isWirelessSession) {
+            wirelessStateTracker.clear();
+        }
+        isWirelessSession = false;
         playbackController.clearSessionPlayback();
         context.sendBroadcast(new Intent(AaService.ACTION_SESSION_ENDED));
         callback.onSessionStateChanged();

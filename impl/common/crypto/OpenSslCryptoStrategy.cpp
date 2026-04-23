@@ -190,7 +190,11 @@ void OpenSslCryptoStrategy::decrypt(const uint8_t* ciphertext, std::size_t size,
         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_ZERO_RETURN) {
             break;  // no more data ready
         }
-        AA_LOG_E("SSL_read failed, error=%d", err);
+        unsigned long ssl_err = ERR_get_error();
+        char err_buf[256];
+        ERR_error_string_n(ssl_err, err_buf, sizeof(err_buf));
+        AA_LOG_E("SSL_read failed, error=%d, ssl_err=0x%lx: %s",
+                 err, ssl_err, err_buf);
         handler(make_error_code(AapErrc::DecryptionFailed), {});
         return;
     }

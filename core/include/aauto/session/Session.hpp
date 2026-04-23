@@ -99,8 +99,6 @@ private:
 
     // Handshake (order: VERSION → SSL → AUTH)
     void begin_version_exchange();
-    void begin_ssl_handshake();
-    void on_ssl_data_received(const uint8_t* data, std::size_t size);
     void on_ssl_complete();
     void send_version_request();
     void on_version_response(const std::vector<uint8_t>& payload);

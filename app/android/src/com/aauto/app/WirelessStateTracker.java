@@ -1,23 +1,27 @@
 package com.aauto.app;
 
+/**
+ * Thread-safe wireless device state cache.
+ * Written from BT RFCOMM thread, read from main thread (UI).
+ */
 class WirelessStateTracker {
-    private String deviceId;
-    private String deviceName;
-    private boolean ready;
+    private volatile String deviceId;
+    private volatile String deviceName;
+    private volatile boolean ready;
 
-    void onConnecting(String nextDeviceId, String nextDeviceName) {
+    synchronized void onConnecting(String nextDeviceId, String nextDeviceName) {
         deviceId = nextDeviceId;
         deviceName = nextDeviceName;
         ready = false;
     }
 
-    void onReady(String nextDeviceId, String nextDeviceName) {
+    synchronized void onReady(String nextDeviceId, String nextDeviceName) {
         deviceId = nextDeviceId;
         deviceName = nextDeviceName;
         ready = true;
     }
 
-    void clear() {
+    synchronized void clear() {
         deviceId = null;
         deviceName = null;
         ready = false;

@@ -42,16 +42,15 @@ class WirelessSessionCoordinator implements BluetoothWirelessManager.Listener {
         if (bt == null || !bt.isEnabled()) return;
 
         WifiManager wm = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
-        if (wm.getWifiApState() != WifiManager.WIFI_AP_STATE_ENABLED) return;
+        if (wm == null || wm.getWifiApState() != WifiManager.WIFI_AP_STATE_ENABLED) return;
 
-        BluetoothWirelessManager.HotspotConfig config =
-                hotspotConfigProvider.read(wm, tcpPort);
-        if (config == null) return;
-
-        stopListening();
-        wirelessManager = new BluetoothWirelessManager(this, config);
-        wirelessManager.startListening();
-        Log.i(TAG, "wireless listening started");
+        hotspotConfigProvider.readAsync(wm, tcpPort, config -> {
+            if (config == null) return;
+            stopListening();
+            wirelessManager = new BluetoothWirelessManager(this, config);
+            wirelessManager.startListening();
+            Log.i(TAG, "wireless listening started");
+        });
     }
 
     void stopListening() {

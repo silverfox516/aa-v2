@@ -36,7 +36,7 @@ public class AaService extends Service
     private static final int TCP_PORT = 5277;
 
     private UsbMonitor usbMonitor;
-    private IAAEngine engineProxy;
+    private volatile IAAEngine engineProxy;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     // USB state
@@ -79,6 +79,8 @@ public class AaService extends Service
 
     public static final String ACTION_SESSION_ENDED = "com.aauto.app.SESSION_ENDED";
 
+    // Binder callbacks arrive on a Binder thread pool. Capture local
+    // references before use to prevent TOCTOU race with onDestroy().
     private final IAAEngineCallback.Stub engineCallback =
             new IAAEngineCallback.Stub() {
         @Override
@@ -90,25 +92,31 @@ public class AaService extends Service
         public void onSessionError(int sessionId, int errorCode, String message) {
             Log.e(TAG, "session " + sessionId + " error " + errorCode +
                     ": " + message);
-            cleanupSession();
+            SessionLifecycleController slc = sessionLifecycleController;
+            if (slc != null) {
+                slc.cleanupSession();
+            }
         }
 
         @Override
         public void onSessionConfig(int sessionId, int videoWidth, int videoHeight) {
             Log.i(TAG, "session config: " + videoWidth + "x" + videoHeight);
-            playbackController.onSessionConfig(videoWidth, videoHeight);
+            PlaybackController pc = playbackController;
+            if (pc != null) pc.onSessionConfig(videoWidth, videoHeight);
         }
 
         @Override
         public void onVideoData(int sessionId, byte[] data, long timestampUs,
                                 boolean isConfig) {
-            playbackController.onVideoData(data, timestampUs, isConfig);
+            PlaybackController pc = playbackController;
+            if (pc != null) pc.onVideoData(data, timestampUs, isConfig);
         }
 
         @Override
         public void onAudioData(int sessionId, int streamType, byte[] data,
                                 long timestampUs) {
-            playbackController.onAudioData(streamType, data);
+            PlaybackController pc = playbackController;
+            if (pc != null) pc.onAudioData(streamType, data);
         }
     };
 
@@ -376,7 +384,7 @@ public class AaService extends Service
 
     public void setSurface(Surface surface) {
         playbackController.setSurface(surface);
-        Log.i(TAG, "setSurface: %s", surface != null ? "decoder ready" : "decoder released");
+        Log.i(TAG, "setSurface: " + (surface != null ? "decoder ready" : "decoder released"));
     }
 
 }
