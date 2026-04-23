@@ -353,3 +353,8 @@ Additional factors:
 architecture (AIDL process boundary). Reference uses JNI with native
 AMediaCodec (single process, zero-copy). Full fix requires native
 video decoding or SharedMemory for frame transfer.
+
+**5GHz AP**: TCC803x WiFi chip supports 5GHz (Band 2), but SoftApManager
+requires a valid country code. `iw reg set`, `settings put`, `setprop
+persist.vendor.wifi.country` all failed at runtime. Requires platform
+build configuration (`ro.boot.wificountrycode=KR` or board overlay).
