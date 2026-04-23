@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # standalone asio (header-only, no boost)
 add_library(asio INTERFACE)
-target_include_directories(asio INTERFACE
+target_include_directories(asio SYSTEM INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/asio)
 target_compile_definitions(asio INTERFACE
     ASIO_STANDALONE
@@ -22,6 +22,9 @@ add_library(aauto-core STATIC
     src/utils/ProtocolConstants.cpp
     src/utils/Logger.cpp
     src/session/Framer.cpp
+    src/session/OutboundMessageEncoder.cpp
+    src/session/InboundMessageAssembler.cpp
+    src/session/HandshakeCoordinator.cpp
     src/session/Session.cpp
     src/service/VideoService.cpp
     src/service/AudioService.cpp
@@ -39,4 +42,6 @@ target_include_directories(aauto-core PUBLIC
 target_link_libraries(aauto-core PUBLIC asio aap_protobuf)
 
 target_compile_options(aauto-core PRIVATE
-    -Wall -Wextra -Wpedantic -Werror)
+    -Wall -Wextra -Wpedantic -Werror
+    -Wno-error=deprecated-literal-operator
+    -Wno-error=gcc-compat)

@@ -2,12 +2,12 @@
 
 #include "aauto/service/ServiceBase.hpp"
 
-#include <atomic>
+#include <asio.hpp>
+
 #include <functional>
 #include <map>
 #include <memory>
 #include <string>
-#include <thread>
 
 namespace aauto::engine { struct HeadunitConfig; }
 
@@ -27,7 +27,8 @@ class ControlService : public ServiceBase {
 public:
     using SessionCloseCallback = std::function<void()>;
 
-    ControlService(SendMessageFn send_fn,
+    ControlService(asio::any_io_executor executor,
+                   SendMessageFn send_fn,
                    const engine::HeadunitConfig& hu_config,
                    std::map<int32_t, std::shared_ptr<IService>> peer_services);
     ~ControlService();
@@ -48,19 +49,20 @@ private:
     void initiate_bye();
     void send_service_discovery_response();
     void send_ping();
-    void heartbeat_loop();
+    void schedule_heartbeat();
+    void on_heartbeat_timer(const std::error_code& ec);
     void trigger_session_close(const char* reason);
 
+    asio::steady_timer heartbeat_timer_;
     const engine::HeadunitConfig& hu_config_;
     std::map<int32_t, std::shared_ptr<IService>> peer_services_;
     SessionCloseCallback session_close_cb_;
     std::string session_tag_;
 
     // Heartbeat
-    std::thread heartbeat_thread_;
-    std::atomic<bool> running_{false};
-    std::atomic<int64_t> last_pong_ns_{0};
-    std::atomic<bool> close_triggered_{false};
+    bool running_ = false;
+    int64_t last_pong_ns_ = 0;
+    bool close_triggered_ = false;
 
     static constexpr int kPingIntervalMs = 5000;
     static constexpr int kPingTimeoutMs  = 10000;

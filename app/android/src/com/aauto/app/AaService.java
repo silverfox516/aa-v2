@@ -7,7 +7,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
-import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
 import android.os.Binder;
 import android.os.Handler;
@@ -18,22 +17,19 @@ import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
 
-import com.aauto.app.wireless.BluetoothWirelessManager;
 import com.aauto.app.wireless.BtProfileGate;
 import com.aauto.engine.IAAEngine;
 import com.aauto.engine.IAAEngineCallback;
-
-import java.net.Inet4Address;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.util.Collections;
 
 /**
  * Background service bridging the Android app with aa-engine daemon.
  * Manages both USB and wireless AA connections.
  */
 public class AaService extends Service
-        implements UsbMonitor.Listener, BluetoothWirelessManager.Listener {
+        implements UsbMonitor.Listener,
+        WirelessSessionCoordinator.Callback,
+        EngineConnectionManager.Callback,
+        SessionLifecycleController.Callback {
     private static final String TAG = "AA.Service";
     private static final int ENGINE_CONNECT_RETRY_MS = 2000;
     private static final int ENGINE_CONNECT_MAX_RETRIES = 10;
@@ -41,22 +37,19 @@ public class AaService extends Service
 
     private UsbMonitor usbMonitor;
     private IAAEngine engineProxy;
-    private int currentSessionId = -1;
-    private int connectRetryCount = 0;
-    private Surface pendingSurface;
-    private int videoWidth = 800;
-    private int videoHeight = 480;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     // USB state
     private UsbDevice availableDevice;
 
     // Wireless state
-    private BluetoothWirelessManager wirelessManager;
     private BtProfileGate btProfileGate;
-    private String wirelessDeviceId;
-    private String wirelessDeviceName;
-    private boolean wirelessReady;
+    private final WirelessStateTracker wirelessState = new WirelessStateTracker();
+    private final HotspotConfigProvider hotspotConfigProvider = new HotspotConfigProvider();
+    private WirelessSessionCoordinator wirelessCoordinator;
+    private EngineConnectionManager engineConnectionManager;
+    private SessionLifecycleController sessionLifecycleController;
+    private UiNavigationController uiNavigationController;
 
     public interface DeviceStateListener {
         void onDeviceStateChanged();
@@ -82,8 +75,7 @@ public class AaService extends Service
 
     private final LocalBinder binder = new LocalBinder();
 
-    private VideoDecoder videoDecoder;
-    private final AudioPlayer audioPlayer = new AudioPlayer();
+    private final PlaybackController playbackController = new PlaybackController();
 
     public static final String ACTION_SESSION_ENDED = "com.aauto.app.SESSION_ENDED";
 
@@ -104,22 +96,19 @@ public class AaService extends Service
         @Override
         public void onSessionConfig(int sessionId, int videoWidth, int videoHeight) {
             Log.i(TAG, "session config: " + videoWidth + "x" + videoHeight);
-            AaService.this.videoWidth = videoWidth;
-            AaService.this.videoHeight = videoHeight;
+            playbackController.onSessionConfig(videoWidth, videoHeight);
         }
 
         @Override
         public void onVideoData(int sessionId, byte[] data, long timestampUs,
                                 boolean isConfig) {
-            if (videoDecoder != null) {
-                videoDecoder.feedData(data, timestampUs, isConfig);
-            }
+            playbackController.onVideoData(data, timestampUs, isConfig);
         }
 
         @Override
         public void onAudioData(int sessionId, int streamType, byte[] data,
                                 long timestampUs) {
-            audioPlayer.feedData(streamType, data);
+            playbackController.onAudioData(streamType, data);
         }
     };
 
@@ -163,11 +152,29 @@ public class AaService extends Service
     public void onCreate() {
         super.onCreate();
         Log.i(TAG, "AaService created");
-        connectToEngine();
+        uiNavigationController = new UiNavigationController(this);
+        sessionLifecycleController = new SessionLifecycleController(
+                this,
+                wirelessState,
+                playbackController,
+                this);
+        engineConnectionManager = new EngineConnectionManager(
+                handler,
+                engineCallback,
+                this,
+                ENGINE_CONNECT_RETRY_MS,
+                ENGINE_CONNECT_MAX_RETRIES);
+        engineConnectionManager.connect();
         usbMonitor = new UsbMonitor(this, this);
         usbMonitor.start();
 
         btProfileGate = new BtProfileGate(this);
+        wirelessCoordinator = new WirelessSessionCoordinator(
+                this,
+                wirelessState,
+                hotspotConfigProvider,
+                btProfileGate,
+                this);
 
         registerReceiver(apStateReceiver,
                 new IntentFilter("android.net.wifi.WIFI_AP_STATE_CHANGED"));
@@ -181,19 +188,21 @@ public class AaService extends Service
     public void onDestroy() {
         Log.i(TAG, "AaService destroying");
         handler.removeCallbacksAndMessages(null);
-        audioPlayer.release();
+        playbackController.shutdown();
         usbMonitor.stop();
-        stopWirelessListening();
-        if (btProfileGate != null) {
-            btProfileGate.close();
-            btProfileGate = null;
+        if (wirelessCoordinator != null) {
+            wirelessCoordinator.shutdown();
+            wirelessCoordinator = null;
         }
+        if (engineConnectionManager != null) {
+            engineConnectionManager.shutdown();
+            engineConnectionManager = null;
+        }
+        sessionLifecycleController = null;
+        uiNavigationController = null;
+        btProfileGate = null;
         try { unregisterReceiver(apStateReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(btStateReceiver); } catch (Exception ignored) {}
-        if (engineProxy != null) {
-            try { engineProxy.stopAll(); }
-            catch (RemoteException e) { Log.w(TAG, "stopAll failed", e); }
-        }
         super.onDestroy();
     }
 
@@ -214,28 +223,15 @@ public class AaService extends Service
         Log.i(TAG, "USB device available: " + device.getProductName());
         availableDevice = device;
         notifyDeviceStateChanged();
-
-        Intent intent = new Intent(this, DeviceListActivity.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-        startActivity(intent);
+        if (uiNavigationController != null) {
+            uiNavigationController.showDeviceList();
+        }
     }
 
     @Override
     public void onDeviceReady(int fd, int epIn, int epOut) {
-        if (engineProxy == null) {
-            Log.e(TAG, "engine not connected, cannot start session");
-            return;
-        }
-        try {
-            ParcelFileDescriptor pfd = ParcelFileDescriptor.adoptFd(fd);
-            currentSessionId = engineProxy.startSession(pfd, epIn, epOut);
-            Log.i(TAG, "USB session started: id=" + currentSessionId);
-            if (pendingSurface != null && currentSessionId > 0) {
-                setSurface(pendingSurface);
-            }
-        } catch (RemoteException e) {
-            Log.e(TAG, "failed to start USB session", e);
+        if (sessionLifecycleController != null) {
+            sessionLifecycleController.startUsbSession(engineProxy, fd, epIn, epOut);
         }
     }
 
@@ -243,188 +239,75 @@ public class AaService extends Service
     public void onDeviceRemoved() {
         Log.i(TAG, "USB device removed");
         availableDevice = null;
-        if (currentSessionId > 0) {
-            if (engineProxy != null) {
-                try { engineProxy.stopSession(currentSessionId); }
-                catch (RemoteException e) { Log.w(TAG, "stopSession failed", e); }
-            }
-            cleanupSession();
+        if (sessionLifecycleController != null
+                && sessionLifecycleController.hasActiveSession()) {
+            sessionLifecycleController.stopActiveSession(engineProxy);
+            sessionLifecycleController.cleanupSession();
         }
         notifyDeviceStateChanged();
     }
 
-    // ===== BluetoothWirelessManager.Listener =====
+    // ===== WirelessSessionCoordinator.Callback =====
 
     @Override
-    public void onDeviceConnecting(String deviceId, String deviceName) {
-        Log.i(TAG, "wireless connecting: " + deviceId + " (" + deviceName + ")");
-        wirelessDeviceId = deviceId;
-        wirelessDeviceName = deviceName;
-        wirelessReady = false;
+    public void onWirelessStateChanged() {
         notifyDeviceStateChanged();
     }
 
     @Override
-    public void onDeviceReady(String deviceId, String deviceName) {
+    public void onWirelessReadyToStartSession(String deviceId, String deviceName) {
         Log.i(TAG, "wireless ready: " + deviceId + " (" + deviceName + ")");
-        wirelessReady = true;
-        notifyDeviceStateChanged();
-
-        // Block A2DP/AVRCP to prevent BT media pause during wireless AA
-        if (btProfileGate != null) {
-            btProfileGate.block(deviceId);
-        }
-
-        // Start TCP AAP session
-        if (engineProxy == null) {
-            Log.e(TAG, "engine not connected, cannot start wireless session");
-            return;
-        }
-        try {
-            currentSessionId = engineProxy.startTcpSession(TCP_PORT);
-            Log.i(TAG, "wireless session started: id=" + currentSessionId);
-
-            // Launch AaDisplayActivity
-            android.app.TaskStackBuilder.create(this)
-                    .addNextIntent(new Intent(this, DeviceListActivity.class))
-                    .addNextIntent(new Intent(this, AaDisplayActivity.class))
-                    .startActivities();
-
-            if (pendingSurface != null && currentSessionId > 0) {
-                setSurface(pendingSurface);
+        if (sessionLifecycleController != null) {
+            sessionLifecycleController.startWirelessSession(engineProxy, TCP_PORT);
+            if (sessionLifecycleController.hasActiveSession()
+                    && uiNavigationController != null) {
+                uiNavigationController.showDisplayFlow();
             }
-        } catch (RemoteException e) {
-            Log.e(TAG, "failed to start wireless session", e);
         }
     }
 
     @Override
-    public void onConnectionFailed(String deviceId, String reason) {
-        Log.e(TAG, "wireless connection failed: " + deviceId + " — " + reason);
-        wirelessDeviceId = null;
-        wirelessDeviceName = null;
-        wirelessReady = false;
-        notifyDeviceStateChanged();
-    }
-
-    @Override
-    public void onDeviceDisconnected(String deviceId, String reason) {
+    public void onWirelessDisconnected(String deviceId, String reason) {
         Log.i(TAG, "wireless disconnected: " + deviceId + " — " + reason);
 
-        // Restore A2DP/AVRCP for this device
-        if (btProfileGate != null) {
-            btProfileGate.restore(deviceId);
+        if (sessionLifecycleController != null
+                && sessionLifecycleController.hasActiveSession()) {
+            sessionLifecycleController.stopActiveSession(engineProxy);
+            sessionLifecycleController.cleanupSession();
         }
+    }
 
-        wirelessDeviceId = null;
-        wirelessDeviceName = null;
-        wirelessReady = false;
+    // ===== EngineConnectionManager.Callback =====
 
-        if (currentSessionId > 0) {
-            if (engineProxy != null) {
-                try { engineProxy.stopSession(currentSessionId); }
-                catch (RemoteException e) { Log.w(TAG, "stopSession failed", e); }
-            }
-            cleanupSession();
-        }
+    @Override
+    public void onEngineConnected(IAAEngine engine) {
+        engineProxy = engine;
+    }
+
+    @Override
+    public void onEngineDisconnected() {
+        engineProxy = null;
+    }
+
+    // ===== SessionLifecycleController.Callback =====
+
+    @Override
+    public void onSessionStateChanged() {
         notifyDeviceStateChanged();
     }
 
     // ===== Wireless management =====
 
     private void startWirelessListeningIfReady() {
-        BluetoothAdapter bt = BluetoothAdapter.getDefaultAdapter();
-        if (bt == null || !bt.isEnabled()) return;
-
-        WifiManager wm = (WifiManager) getSystemService(Context.WIFI_SERVICE);
-        if (wm.getWifiApState() != WifiManager.WIFI_AP_STATE_ENABLED) return;
-
-        BluetoothWirelessManager.HotspotConfig config = readHotspotConfig(wm);
-        if (config == null) return;
-
-        stopWirelessListening();
-        wirelessManager = new BluetoothWirelessManager(this, config);
-        wirelessManager.startListening();
-        Log.i(TAG, "wireless listening started");
+        if (wirelessCoordinator != null) {
+            wirelessCoordinator.startListeningIfReady(TCP_PORT);
+        }
     }
 
     private void stopWirelessListening() {
-        if (wirelessManager != null) {
-            wirelessManager.stop();
-            wirelessManager = null;
-            Log.i(TAG, "wireless listening stopped");
+        if (wirelessCoordinator != null) {
+            wirelessCoordinator.stopListening();
         }
-    }
-
-    @SuppressWarnings("deprecation")
-    private BluetoothWirelessManager.HotspotConfig readHotspotConfig(WifiManager wm) {
-        WifiConfiguration apConfig = wm.getWifiApConfiguration();
-        if (apConfig == null) {
-            Log.e(TAG, "getWifiApConfiguration() returned null");
-            return null;
-        }
-
-        String ssid = apConfig.SSID != null ? apConfig.SSID : "";
-        String password = apConfig.preSharedKey != null ? apConfig.preSharedKey : "";
-        String[] netInfo = getApNetworkInfo();
-
-        Log.i(TAG, "hotspot: ssid=" + ssid + " ip=" + netInfo[0]
-                + " bssid=" + netInfo[1] + " port=" + TCP_PORT);
-        return new BluetoothWirelessManager.HotspotConfig(
-                ssid, password, netInfo[1], netInfo[0], TCP_PORT);
-    }
-
-    private String[] getApNetworkInfo() {
-        for (int attempt = 0; attempt < 5; attempt++) {
-            try {
-                for (NetworkInterface iface :
-                        Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                    if (iface.isLoopback() || !iface.isUp()) continue;
-                    String name = iface.getName();
-                    if (name.startsWith("wlan") || name.startsWith("ap")
-                            || name.startsWith("swlan")) {
-                        for (InetAddress addr :
-                                Collections.list(iface.getInetAddresses())) {
-                            if (addr instanceof Inet4Address
-                                    && !addr.isLoopbackAddress()) {
-                                String ip = addr.getHostAddress();
-                                byte[] mac = iface.getHardwareAddress();
-                                String bssid = "02:00:00:00:00:00";
-                                if (mac != null) {
-                                    bssid = String.format(
-                                        "%02x:%02x:%02x:%02x:%02x:%02x",
-                                        mac[0], mac[1], mac[2],
-                                        mac[3], mac[4], mac[5]);
-                                }
-                                return new String[]{ip, bssid};
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "getApNetworkInfo failed: " + e.getMessage());
-            }
-            try { Thread.sleep(500); } catch (InterruptedException ignored) { break; }
-        }
-        return new String[]{"192.168.43.1", "02:00:00:00:00:00"};
-    }
-
-    // ===== Session cleanup =====
-
-    private synchronized void cleanupSession() {
-        if (currentSessionId <= 0) return;
-        currentSessionId = -1;
-        wirelessDeviceId = null;
-        wirelessDeviceName = null;
-        wirelessReady = false;
-        if (videoDecoder != null) {
-            videoDecoder.release();
-            videoDecoder = null;
-        }
-        audioPlayer.release();
-        sendBroadcast(new Intent(ACTION_SESSION_ENDED));
-        notifyDeviceStateChanged();
-        Log.i(TAG, "session cleaned up");
     }
 
     // ===== Public API for Activity =====
@@ -434,19 +317,20 @@ public class AaService extends Service
     }
 
     public String getWirelessDeviceName() {
-        return wirelessDeviceName;
+        return wirelessState.getDeviceName();
     }
 
     public boolean isWirelessConnecting() {
-        return wirelessDeviceId != null && !wirelessReady;
+        return wirelessState.isConnecting();
     }
 
     public boolean isWirelessReady() {
-        return wirelessReady;
+        return wirelessState.isReady();
     }
 
     public boolean hasActiveSession() {
-        return currentSessionId > 0;
+        return sessionLifecycleController != null
+                && sessionLifecycleController.hasActiveSession();
     }
 
     public boolean isBluetoothEnabled() {
@@ -471,17 +355,18 @@ public class AaService extends Service
             Log.e(TAG, "failed to open USB device");
             return;
         }
-        android.app.TaskStackBuilder.create(this)
-                .addNextIntent(new Intent(this, DeviceListActivity.class))
-                .addNextIntent(new Intent(this, AaDisplayActivity.class))
-                .startActivities();
+        if (uiNavigationController != null) {
+            uiNavigationController.showDisplayFlow();
+        }
     }
 
-    public int getVideoWidth() { return videoWidth; }
-    public int getVideoHeight() { return videoHeight; }
+    public int getVideoWidth() { return playbackController.getVideoWidth(); }
+    public int getVideoHeight() { return playbackController.getVideoHeight(); }
 
     public void sendTouchEvent(int x, int y, int action) {
-        if (engineProxy == null || currentSessionId <= 0) return;
+        if (engineProxy == null || sessionLifecycleController == null) return;
+        int currentSessionId = sessionLifecycleController.getCurrentSessionId();
+        if (currentSessionId <= 0) return;
         try {
             engineProxy.sendTouchEvent(currentSessionId, x, y, action);
         } catch (RemoteException e) {
@@ -490,45 +375,8 @@ public class AaService extends Service
     }
 
     public void setSurface(Surface surface) {
-        pendingSurface = surface;
-        if (surface != null) {
-            if (videoDecoder == null) {
-                videoDecoder = new VideoDecoder();
-            }
-            videoDecoder.setSurface(surface);
-            Log.i(TAG, "setSurface: decoder ready");
-        } else {
-            if (videoDecoder != null) {
-                videoDecoder.release();
-                videoDecoder = null;
-            }
-            Log.i(TAG, "setSurface: decoder released");
-        }
+        playbackController.setSurface(surface);
+        Log.i(TAG, "setSurface: %s", surface != null ? "decoder ready" : "decoder released");
     }
 
-    // ===== Engine connection with retry =====
-
-    private void connectToEngine() {
-        IBinder binder = android.os.ServiceManager.getService("aa-engine");
-        if (binder == null) {
-            connectRetryCount++;
-            if (connectRetryCount <= ENGINE_CONNECT_MAX_RETRIES) {
-                Log.w(TAG, "aa-engine not found, retry " + connectRetryCount +
-                        "/" + ENGINE_CONNECT_MAX_RETRIES);
-                handler.postDelayed(this::connectToEngine, ENGINE_CONNECT_RETRY_MS);
-            } else {
-                Log.e(TAG, "aa-engine not found after max retries");
-            }
-            return;
-        }
-        engineProxy = IAAEngine.Stub.asInterface(binder);
-        try {
-            engineProxy.registerCallback(engineCallback);
-            connectRetryCount = 0;
-            Log.i(TAG, "connected to aa-engine");
-        } catch (RemoteException e) {
-            Log.e(TAG, "registerCallback failed", e);
-            engineProxy = null;
-        }
-    }
 }

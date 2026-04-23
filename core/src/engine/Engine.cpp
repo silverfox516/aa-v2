@@ -92,25 +92,16 @@ void Engine::send_touch_event(uint32_t session_id,
 // ===== Lifecycle =====
 
 void Engine::run(unsigned int thread_count) {
+    if (thread_count == 0) {
+        thread_count = 1;
+    }
+
     AA_LOG_I("engine run with %u threads", thread_count);
-    threads_.reserve(thread_count);
-    for (unsigned int i = 0; i < thread_count; ++i) {
+    threads_.reserve(thread_count > 0 ? thread_count - 1 : 0);
+    for (unsigned int i = 1; i < thread_count; ++i) {
         threads_.emplace_back([this] { io_context_.run(); });
     }
-    for (auto& t : threads_) {
-        t.join();
-    }
-}
-
-void Engine::shutdown() {
-    AA_LOG_I("engine shutdown");
-    work_guard_.reset();
-
-    for (auto& [id, session] : sessions_) {
-        session->stop();
-    }
-
-    io_context_.stop();
+    io_context_.run();
 
     for (auto& t : threads_) {
         if (t.joinable()) {
@@ -118,7 +109,12 @@ void Engine::shutdown() {
         }
     }
     threads_.clear();
-    sessions_.clear();
+}
+
+void Engine::shutdown() {
+    AA_LOG_I("engine shutdown");
+    work_guard_.reset();
+    io_context_.stop();
 }
 
 // ===== ISessionObserver =====
@@ -169,35 +165,82 @@ void Engine::on_session_error(uint32_t session_id,
 
 // ===== Internal =====
 
-void Engine::do_start_session(const std::string& descriptor, uint32_t sid) {
-    auto transport = transport_factory_->create(
-        io_context_.get_executor(), descriptor);
-    if (!transport) {
-        AA_LOG_E("failed to create transport for: %s", descriptor.c_str());
-        if (callback_) {
-            callback_->on_session_error(sid,
-                make_error_code(AapErrc::TransportClosed),
-                "failed to create transport");
-        }
-        return;
-    }
-
-    auto crypto = crypto_factory_->create(config_.crypto_config);
-
-    session::SessionConfig sconfig;
-    sconfig.session_id = sid;
-
-    auto session = std::make_shared<session::Session>(
-        io_context_.get_executor(), sconfig,
-        std::move(transport), std::move(crypto), this);
-
-    // Create send function bound to this session
-    auto send_fn = [weak = std::weak_ptr<session::Session>(session)](
+service::SendMessageFn Engine::make_send_fn(
+        const std::shared_ptr<session::Session>& session) const {
+    return [weak = std::weak_ptr<session::Session>(session)](
             uint8_t ch, uint16_t type, const std::vector<uint8_t>& payload) {
         if (auto s = weak.lock()) {
             s->send_message(ch, type, payload);
         }
     };
+}
+
+std::shared_ptr<session::Session> Engine::create_session(
+        uint32_t sid,
+        std::shared_ptr<transport::ITransport> transport) {
+    auto crypto = crypto_factory_->create(config_.crypto_config);
+
+    session::SessionConfig sconfig;
+    sconfig.session_id = sid;
+
+    return std::make_shared<session::Session>(
+        io_context_.get_executor(), sconfig,
+        std::move(transport), std::move(crypto), this);
+}
+
+std::shared_ptr<service::ControlService> Engine::create_control_service(
+        uint32_t sid,
+        const std::shared_ptr<session::Session>& session,
+        const std::map<int32_t, std::shared_ptr<service::IService>>& peer_services) {
+    auto control_svc = std::make_shared<service::ControlService>(
+        io_context_.get_executor(), make_send_fn(session), config_, peer_services);
+    control_svc->set_channel(kControlChannelId);
+    control_svc->set_log_tag("s" + std::to_string(sid));
+    control_svc->set_session_close_callback(
+        [weak = std::weak_ptr<session::Session>(session)] {
+            if (auto s = weak.lock()) {
+                s->stop();
+            }
+        });
+    control_svc->on_channel_open(kControlChannelId);  // implicit channel — start heartbeat
+    return control_svc;
+}
+
+void Engine::register_services(
+        const std::shared_ptr<session::Session>& session,
+        std::map<int32_t, std::shared_ptr<service::IService>> peer_services,
+        const std::shared_ptr<service::ControlService>& control_service) {
+    session->register_service(kControlChannelId, control_service);
+
+    for (auto& [service_id, svc] : peer_services) {
+        session->register_service(static_cast<uint8_t>(service_id), std::move(svc));
+    }
+}
+
+void Engine::activate_session(uint32_t sid) {
+    if (active_session_id_ == 0) {
+        active_session_id_ = sid;
+    }
+}
+
+void Engine::report_start_session_failure(uint32_t sid, const std::string& detail) {
+    if (!callback_) return;
+
+    callback_->on_session_error(sid,
+        make_error_code(AapErrc::TransportClosed),
+        detail);
+}
+
+void Engine::do_start_session(const std::string& descriptor, uint32_t sid) {
+    auto transport = transport_factory_->create(
+        io_context_.get_executor(), descriptor);
+    if (!transport) {
+        AA_LOG_E("failed to create transport for: %s", descriptor.c_str());
+        report_start_session_failure(sid, "failed to create transport");
+        return;
+    }
+    auto session = create_session(sid, std::move(transport));
+    auto send_fn = make_send_fn(session);
 
     // Create peer services (ch 1~6: video, audio, input, sensor, etc.)
     auto peer_services = service_factory_->create_services(send_fn);
@@ -209,30 +252,11 @@ void Engine::do_start_session(const std::string& descriptor, uint32_t sid) {
     }
 
     // Create ControlService (ch 0) with references to peer services
-    auto control_svc = std::make_shared<service::ControlService>(
-        send_fn, config_, peer_services);
-    control_svc->set_channel(kControlChannelId);
-    control_svc->on_channel_open(kControlChannelId);  // implicit channel — start heartbeat
-    control_svc->set_log_tag("s" + std::to_string(sid));
-    control_svc->set_session_close_callback(
-        [weak = std::weak_ptr<session::Session>(session)] {
-            if (auto s = weak.lock()) {
-                s->stop();
-            }
-        });
-    session->register_service(kControlChannelId, control_svc);
-
-    // Register peer services
-    for (auto& [service_id, svc] : peer_services) {
-        session->register_service(static_cast<uint8_t>(service_id), std::move(svc));
-    }
+    auto control_svc = create_control_service(sid, session, peer_services);
+    register_services(session, std::move(peer_services), control_svc);
 
     sessions_[sid] = session;
-
-    if (active_session_id_ == 0) {
-        active_session_id_ = sid;
-    }
-
+    activate_session(sid);
     session->start();
 }
 

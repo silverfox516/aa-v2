@@ -24,7 +24,7 @@ namespace aauto::service {
 namespace pb_media = aap_protobuf::service::media;
 
 static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSize());
+    std::vector<uint8_t> buf(msg.ByteSizeLong());
     msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
     return buf;
 }

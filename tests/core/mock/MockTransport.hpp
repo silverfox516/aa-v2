@@ -3,6 +3,7 @@
 #include "aauto/transport/ITransport.hpp"
 
 #include <deque>
+#include <optional>
 #include <vector>
 
 namespace aauto::test {
@@ -16,6 +17,16 @@ public:
 
     void async_read(asio::mutable_buffer buffer,
                     transport::ReadHandler handler) override {
+        if (pending_read_error_) {
+            auto ec = *pending_read_error_;
+            pending_read_error_.reset();
+            auto h = std::move(handler);
+            asio::post(executor_, [h, ec] {
+                h(ec, 0);
+            });
+            return;
+        }
+
         if (!open_ || read_queue_.empty()) {
             // Store pending read for later fulfillment
             pending_read_buffer_ = buffer;
@@ -110,7 +121,10 @@ public:
             asio::post(executor_, [h, ec] {
                 h(ec, 0);
             });
+            return;
         }
+
+        pending_read_error_ = ec;
     }
 
 private:
@@ -123,6 +137,7 @@ private:
     // Pending read state
     asio::mutable_buffer pending_read_buffer_;
     transport::ReadHandler pending_read_handler_;
+    std::optional<std::error_code> pending_read_error_;
 };
 
 } // namespace aauto::test

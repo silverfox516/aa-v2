@@ -20,6 +20,11 @@ add_executable(aauto_core_test
     core/placeholder_test.cpp
     core/framer_test.cpp
     core/session_handshake_test.cpp
+    core/control_service_test.cpp
+    core/engine_test.cpp
+    core/outbound_message_encoder_test.cpp
+    core/inbound_message_assembler_test.cpp
+    core/handshake_coordinator_test.cpp
 )
 
 target_include_directories(aauto_core_test PRIVATE

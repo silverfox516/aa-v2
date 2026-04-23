@@ -15,6 +15,8 @@
 #include <thread>
 #include <vector>
 
+namespace aauto::service { class ControlService; }
+
 namespace aauto::engine {
 
 /// Factory: creates platform-specific transports.
@@ -81,6 +83,21 @@ public:
                           const std::error_code& ec) override;
 
 private:
+    service::SendMessageFn make_send_fn(
+        const std::shared_ptr<session::Session>& session) const;
+    std::shared_ptr<session::Session> create_session(
+        uint32_t sid,
+        std::shared_ptr<transport::ITransport> transport);
+    std::shared_ptr<service::ControlService> create_control_service(
+        uint32_t sid,
+        const std::shared_ptr<session::Session>& session,
+        const std::map<int32_t, std::shared_ptr<service::IService>>& peer_services);
+    void register_services(
+        const std::shared_ptr<session::Session>& session,
+        std::map<int32_t, std::shared_ptr<service::IService>> peer_services,
+        const std::shared_ptr<service::ControlService>& control_service);
+    void activate_session(uint32_t sid);
+    void report_start_session_failure(uint32_t sid, const std::string& detail);
     void do_start_session(const std::string& descriptor, uint32_t sid);
     void cleanup_session(uint32_t session_id);
 

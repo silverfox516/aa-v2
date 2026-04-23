@@ -22,7 +22,7 @@ namespace pb_input = aap_protobuf::service::inputsource::message;
 namespace pb_keybind = aap_protobuf::service::media::sink::message;
 
 static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSize());
+    std::vector<uint8_t> buf(msg.ByteSizeLong());
     msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
     return buf;
 }

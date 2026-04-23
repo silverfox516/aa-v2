@@ -25,7 +25,7 @@ namespace pb_shared = aap_protobuf::shared;
 
 // Helper: serialize protobuf to byte vector
 static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSize());
+    std::vector<uint8_t> buf(msg.ByteSizeLong());
     msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
     return buf;
 }
@@ -68,9 +68,9 @@ protected:
 
     // Run io_context until no more work (with a safety limit)
     void run_io(int max_iterations = 100) {
+        io_.restart();
         for (int i = 0; i < max_iterations; ++i) {
             if (io_.poll() == 0) break;
-            io_.restart();
         }
     }
 

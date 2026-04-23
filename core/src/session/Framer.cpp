@@ -40,14 +40,11 @@ bool Framer::try_parse_fragment(FragmentHandler& on_fragment) {
     uint16_t payload_length = (static_cast<uint16_t>(recv_buffer_[2]) << 8)
                             | static_cast<uint16_t>(recv_buffer_[3]);
 
-    // Multi-first fragments have a 4-byte total_size field after header
-    bool is_multi_first = is_first && !is_last;
-    std::size_t extra_skip = is_multi_first ? 4 : 0;
-    std::size_t total_frame_size = kFrameHeaderSize + extra_skip + payload_length;
+    std::size_t total_frame_size = kFrameHeaderSize + payload_length;
 
     if (recv_buffer_.size() < total_frame_size) return false;
 
-    const uint8_t* payload_ptr = recv_buffer_.data() + kFrameHeaderSize + extra_skip;
+    const uint8_t* payload_ptr = recv_buffer_.data() + kFrameHeaderSize;
 
     AapFragment frag;
     frag.channel_id = channel_id;

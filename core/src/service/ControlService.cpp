@@ -33,7 +33,7 @@ namespace aauto::service {
 namespace pb_ctrl = aap_protobuf::service::control::message;
 
 static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSize());
+    std::vector<uint8_t> buf(msg.ByteSizeLong());
     msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
     return buf;
 }
@@ -43,10 +43,12 @@ static int64_t steady_now_ns() {
 }
 
 ControlService::ControlService(
+        asio::any_io_executor executor,
         SendMessageFn send_fn,
         const engine::HeadunitConfig& hu_config,
         std::map<int32_t, std::shared_ptr<IService>> peer_services)
     : ServiceBase(std::move(send_fn))
+    , heartbeat_timer_(executor)
     , hu_config_(hu_config)
     , peer_services_(std::move(peer_services)) {
 
@@ -196,17 +198,12 @@ void ControlService::on_channel_open(uint8_t channel_id) {
     last_pong_ns_ = steady_now_ns();
     close_triggered_ = false;
     running_ = true;
-    heartbeat_thread_ = std::thread([this] {
-        aauto::set_session_tag(session_tag_);
-        heartbeat_loop();
-    });
+    schedule_heartbeat();
 }
 
 void ControlService::on_channel_close() {
     running_ = false;
-    if (heartbeat_thread_.joinable()) {
-        heartbeat_thread_.join();
-    }
+    heartbeat_timer_.cancel();
     ServiceBase::on_channel_close();
 }
 
@@ -252,29 +249,28 @@ void ControlService::send_ping() {
     send(static_cast<uint16_t>(ControlMessageType::PingRequest), serialize(ping));
 }
 
-void ControlService::heartbeat_loop() {
-    AA_LOG_D("heartbeat thread started");
+void ControlService::schedule_heartbeat() {
+    heartbeat_timer_.expires_after(std::chrono::milliseconds(kPingIntervalMs));
+    heartbeat_timer_.async_wait(
+        [this](const std::error_code& ec) { on_heartbeat_timer(ec); });
+}
 
-    while (running_) {
-        // Sleep in short intervals for responsive shutdown
-        for (int i = 0; i < kPingIntervalMs / 100 && running_; ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-        if (!running_) break;
-
-        send_ping();
-
-        // Check for timeout
-        auto elapsed_ns = steady_now_ns() - last_pong_ns_.load();
-        auto elapsed_ms = elapsed_ns / 1000000;
-        if (elapsed_ms > kPingTimeoutMs) {
-            AA_LOG_E("ping timeout (%lld ms)", static_cast<long long>(elapsed_ms));
-            trigger_session_close("PingTimeout");
-            break;
-        }
+void ControlService::on_heartbeat_timer(const std::error_code& ec) {
+    if (ec == asio::error::operation_aborted || !running_) {
+        return;
     }
 
-    AA_LOG_D("heartbeat thread exited");
+    send_ping();
+
+    const auto elapsed_ns = steady_now_ns() - last_pong_ns_;
+    const auto elapsed_ms = elapsed_ns / 1000000;
+    if (elapsed_ms > kPingTimeoutMs) {
+        AA_LOG_E("ping timeout (%lld ms)", static_cast<long long>(elapsed_ms));
+        trigger_session_close("PingTimeout");
+        return;
+    }
+
+    schedule_heartbeat();
 }
 
 void ControlService::on_session_stop() {
@@ -289,10 +285,10 @@ void ControlService::initiate_bye() {
 }
 
 void ControlService::trigger_session_close(const char* reason) {
-    bool expected = false;
-    if (!close_triggered_.compare_exchange_strong(expected, true)) {
+    if (close_triggered_) {
         return;
     }
+    close_triggered_ = true;
     AA_LOG_I("session close triggered: %s", reason);
     if (session_close_cb_) {
         session_close_cb_();

@@ -14,7 +14,7 @@ namespace pb_ctrl = aap_protobuf::service::control::message;
 
 // Helper: serialize protobuf to byte vector
 static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSize());
+    std::vector<uint8_t> buf(msg.ByteSizeLong());
     msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
     return buf;
 }
@@ -29,6 +29,20 @@ Session::Session(asio::any_io_executor executor,
     , transport_(std::move(transport))
     , crypto_(std::move(crypto))
     , observer_(observer)
+    , outbound_encoder_(
+        crypto_,
+        [this](const std::error_code& ec) { handle_error(ec); },
+        [this](std::vector<uint8_t> wire) { enqueue_write(std::move(wire)); })
+    , inbound_assembler_(
+        crypto_,
+        [this](const std::error_code& ec) { handle_error(ec); })
+    , handshake_coordinator_(
+        crypto_,
+        [this](uint16_t type, const std::vector<uint8_t>& payload) {
+            send_message(kControlChannelId, type, payload);
+        },
+        [this] { on_ssl_complete(); },
+        [this](const std::error_code& ec) { handle_error(ec); })
     , state_timer_(strand_) {
     read_buffer_.fill(0);
 }
@@ -57,12 +71,7 @@ void Session::stop() {
         if (is_terminal(self->state_)) return;
 
         if (self->state_ == SessionState::Running) {
-            self->transition_to(SessionState::Disconnecting);
-            self->start_state_timer(self->config_.byebye_timeout_ms);
-
-            for (auto& [ch, svc] : self->services_) {
-                svc->on_session_stop();
-            }
+            self->begin_disconnect();
         } else {
             self->handle_error(make_error_code(AapErrc::SessionTerminated));
         }
@@ -91,41 +100,7 @@ void Session::send_touch_event(int32_t x, int32_t y, int32_t action) {
 
 void Session::send_message(uint8_t channel_id, uint16_t message_type,
                            const std::vector<uint8_t>& payload) {
-    // Build full payload: [message_type:2 BE][protobuf body]
-    std::vector<uint8_t> full_payload;
-    full_payload.reserve(2 + payload.size());
-    full_payload.push_back(static_cast<uint8_t>((message_type >> 8) & 0xFF));
-    full_payload.push_back(static_cast<uint8_t>(message_type & 0xFF));
-    full_payload.insert(full_payload.end(), payload.begin(), payload.end());
-
-    // After SSL handshake, ALL channels are encrypted (including control)
-    bool needs_encryption = crypto_->is_established();
-
-    if (needs_encryption) {
-        auto self = shared_from_this();
-        auto flags = compute_frame_flags(channel_id, message_type, true);
-        crypto_->encrypt(full_payload.data(), full_payload.size(),
-            [self, channel_id, flags](const std::error_code& ec,
-                               std::vector<uint8_t> ciphertext) {
-                if (ec) {
-                    AA_LOG_E("encrypt failed: %s", ec.message().c_str());
-                    self->handle_error(ec);
-                    return;
-                }
-                OutboundFrame frame{channel_id, flags, std::move(ciphertext)};
-                auto wire_frames = self->framer_.encode(frame);
-                for (auto& wire : wire_frames) {
-                    self->enqueue_write(std::move(wire));
-                }
-            });
-    } else {
-        auto flags = compute_frame_flags(channel_id, message_type, false);
-        OutboundFrame frame{channel_id, flags, std::move(full_payload)};
-        auto wire_frames = framer_.encode(frame);
-        for (auto& wire : wire_frames) {
-            enqueue_write(std::move(wire));
-        }
-    }
+    outbound_encoder_.send_message(channel_id, message_type, payload);
 }
 
 void Session::send_raw(uint8_t channel_id, uint16_t message_type,
@@ -198,52 +173,35 @@ void Session::on_read_complete(const std::error_code& ec,
     }
 
     auto self = shared_from_this();
-    framer_.feed(read_buffer_.data(), bytes,
-        [self](AapFragment frag) {
-            self->on_fragment(std::move(frag));
+    inbound_assembler_.feed(read_buffer_.data(), bytes,
+        [self](AapMessage message) {
+            self->dispatch_decrypted(message.channel_id,
+                                     message.message_type,
+                                     std::move(message.payload));
         });
 
     start_read();
 }
 
-void Session::on_fragment(AapFragment frag) {
-    auto& payload = channel_payloads_[frag.channel_id];
-
-    // FIRST resets the channel buffer
-    if (frag.is_first) {
-        payload.clear();
+bool Session::handle_handshake_message(uint16_t msg_type,
+                                       const std::vector<uint8_t>& payload) {
+    auto ct = static_cast<ControlMessageType>(msg_type);
+    switch (ct) {
+        case ControlMessageType::VersionResponse:
+            on_version_response(payload);
+            return true;
+        case ControlMessageType::EncapsulatedSsl:
+            handshake_coordinator_.on_ssl_data_received(payload.data(), payload.size());
+            return true;
+        default:
+            AA_LOG_W("unexpected %s during handshake", msg_type_name(msg_type));
+            return true;
     }
+}
 
-    // Decrypt per-fragment, append plaintext (matches aasdk model)
-    if (frag.encrypted && crypto_->is_established()) {
-        std::vector<uint8_t> plaintext;
-        crypto_->decrypt(frag.payload.data(), frag.payload.size(),
-            [&plaintext](const std::error_code& ec,
-                         std::vector<uint8_t> pt) {
-                if (!ec) plaintext = std::move(pt);
-            });
-        payload.insert(payload.end(), plaintext.begin(), plaintext.end());
-    } else {
-        payload.insert(payload.end(), frag.payload.begin(), frag.payload.end());
-    }
-
-    // Wait for more fragments
-    if (!frag.is_last) return;
-
-    // Complete message — extract msg_type and dispatch
-    if (payload.size() < 2) {
-        AA_LOG_W("ch %u: message too short (%zu bytes), dropping",
-                 frag.channel_id, payload.size());
-        payload.clear();
-        return;
-    }
-
-    uint16_t msg_type = (static_cast<uint16_t>(payload[0]) << 8)
-                      | static_cast<uint16_t>(payload[1]);
-    std::vector<uint8_t> msg_payload(payload.begin() + 2, payload.end());
-    payload.clear();
-
-    dispatch_decrypted(frag.channel_id, msg_type, std::move(msg_payload));
+bool Session::is_handshake_state() const {
+    return state_ == SessionState::VersionExchange ||
+           state_ == SessionState::SslHandshake;
 }
 
 void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
@@ -259,20 +217,9 @@ void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
 
     // During handshake, Session handles VERSION and SSL messages directly.
     // After handshake (Running), ALL messages go to registered services.
-    if (state_ == SessionState::VersionExchange ||
-        state_ == SessionState::SslHandshake) {
-        auto ct = static_cast<ControlMessageType>(msg_type);
-        switch (ct) {
-            case ControlMessageType::VersionResponse:
-                on_version_response(payload);
-                return;
-            case ControlMessageType::EncapsulatedSsl:
-                on_ssl_data_received(payload.data(), payload.size());
-                return;
-            default:
-                AA_LOG_W("unexpected %s during handshake", msg_type_name(msg_type));
-                return;
-        }
+    if (is_handshake_state()) {
+        handle_handshake_message(msg_type, payload);
+        return;
     }
 
     // Post-handshake: delegate to services (including ch 0 = ControlService)
@@ -298,18 +245,22 @@ void Session::transition_to(SessionState new_state) {
     }
 }
 
+void Session::close_transport_and_services() {
+    state_timer_.cancel();
+    transport_->close();
+
+    for (auto& [ch_id, svc] : services_) {
+        (void)ch_id;
+        svc->on_channel_close();
+    }
+}
+
 void Session::handle_error(const std::error_code& ec) {
     if (is_terminal(state_)) return;
 
     AA_LOG_E("session %u error: %s", config_.session_id, ec.message().c_str());
     transition_to(SessionState::Error);
-
-    state_timer_.cancel();
-    transport_->close();
-
-    for (auto& [ch_id, svc] : services_) {
-        svc->on_channel_close();
-    }
+    close_transport_and_services();
 
     if (observer_) {
         observer_->on_session_error(config_.session_id, ec);
@@ -338,8 +289,7 @@ void Session::on_state_timeout() {
             handle_error(make_error_code(AapErrc::SslHandshakeFailed));
             break;
         case SessionState::Disconnecting:
-            transition_to(SessionState::Disconnected);
-            transport_->close();
+            complete_disconnect();
             break;
         default:
             break;
@@ -356,6 +306,21 @@ void Session::begin_version_exchange() {
     send_version_request();
 }
 
+void Session::begin_disconnect() {
+    transition_to(SessionState::Disconnecting);
+    start_state_timer(config_.byebye_timeout_ms);
+
+    if (services_.find(kControlChannelId) == services_.end()) {
+        complete_disconnect();
+        return;
+    }
+
+    for (auto& [ch, svc] : services_) {
+        (void)ch;
+        svc->on_session_stop();
+    }
+}
+
 void Session::send_version_request() {
     // VERSION_REQUEST payload is raw bytes, not protobuf:
     // [major:2 BE][minor:2 BE]
@@ -369,67 +334,19 @@ void Session::send_version_request() {
 }
 
 void Session::on_version_response(const std::vector<uint8_t>& payload) {
-    // VERSION_RESPONSE is raw bytes: [major:2 BE][minor:2 BE][status:2 BE]
-    if (payload.size() >= 6) {
-        uint16_t major  = (payload[0] << 8) | payload[1];
-        uint16_t minor  = (payload[2] << 8) | payload[3];
-        int16_t  status = static_cast<int16_t>((payload[4] << 8) | payload[5]);
-        AA_LOG_I("VERSION_RESPONSE: v%u.%u status=%d", major, minor, status);
-        if (status != 0) {
-            AA_LOG_E("phone refused version (status=%d)", status);
-            handle_error(make_error_code(AapErrc::VersionMismatch));
-            return;
-        }
-    } else {
-        AA_LOG_W("VERSION_RESPONSE short (%zu bytes), assuming OK", payload.size());
-    }
-
-    // Version OK → start SSL handshake
-    AA_LOG_I("version exchange complete, starting SSL handshake");
-    begin_ssl_handshake();
+    transition_to(SessionState::SslHandshake);
+    start_state_timer(config_.ssl_handshake_timeout_ms);
+    handshake_coordinator_.on_version_response(payload);
 }
 
 void Session::begin_ssl_handshake() {
-    transition_to(SessionState::SslHandshake);
-    start_state_timer(config_.ssl_handshake_timeout_ms);
-
-    auto self = shared_from_this();
-    crypto_->handshake_step(nullptr, 0,
-        [self](const std::error_code& ec, crypto::HandshakeResult result) {
-            if (ec) {
-                self->handle_error(make_error_code(AapErrc::SslHandshakeFailed));
-                return;
-            }
-            if (!result.output_bytes.empty()) {
-                self->send_message(kControlChannelId,
-                    static_cast<uint16_t>(ControlMessageType::EncapsulatedSsl),
-                    result.output_bytes);
-            }
-            if (result.complete) {
-                self->on_ssl_complete();
-            }
-        });
+    handshake_coordinator_.begin_ssl_handshake();
 }
 
 void Session::on_ssl_data_received(const uint8_t* data, std::size_t size) {
     if (state_ != SessionState::SslHandshake) return;
 
-    auto self = shared_from_this();
-    crypto_->handshake_step(data, size,
-        [self](const std::error_code& ec, crypto::HandshakeResult result) {
-            if (ec) {
-                self->handle_error(make_error_code(AapErrc::SslHandshakeFailed));
-                return;
-            }
-            if (!result.output_bytes.empty()) {
-                self->send_message(kControlChannelId,
-                    static_cast<uint16_t>(ControlMessageType::EncapsulatedSsl),
-                    result.output_bytes);
-            }
-            if (result.complete) {
-                self->on_ssl_complete();
-            }
-        });
+    handshake_coordinator_.on_ssl_data_received(data, size);
 }
 
 void Session::on_ssl_complete() {
@@ -440,25 +357,18 @@ void Session::on_ssl_complete() {
     pb_ctrl::AuthResponse auth;
     auth.set_status(0);
     auto payload = serialize(auth);
-
-    // Build and send as plaintext frame directly
-    std::vector<uint8_t> full_payload;
-    uint16_t msg_type = static_cast<uint16_t>(ControlMessageType::AuthComplete);
-    full_payload.push_back(static_cast<uint8_t>((msg_type >> 8) & 0xFF));
-    full_payload.push_back(static_cast<uint8_t>(msg_type & 0xFF));
-    full_payload.insert(full_payload.end(), payload.begin(), payload.end());
-
-    auto flags = compute_frame_flags(kControlChannelId, msg_type, false);
-    OutboundFrame frame{kControlChannelId, flags, std::move(full_payload)};
-    auto wire_frames = framer_.encode(frame);
-    for (auto& wire : wire_frames) {
-        enqueue_write(std::move(wire));
-    }
+    outbound_encoder_.send_plaintext_control_message(
+        static_cast<uint16_t>(ControlMessageType::AuthComplete), payload);
 
     // Handshake complete — transition to Running.
     // ControlService will handle ServiceDiscovery, ChannelOpen, Ping, etc.
     transition_to(SessionState::Running);
     AA_LOG_I("session running, all messages delegated to services");
+}
+
+void Session::complete_disconnect() {
+    transition_to(SessionState::Disconnected);
+    transport_->close();
 }
 
 } // namespace aauto::session

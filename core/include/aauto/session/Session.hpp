@@ -2,6 +2,9 @@
 
 #include "aauto/session/SessionState.hpp"
 #include "aauto/session/Framer.hpp"
+#include "aauto/session/HandshakeCoordinator.hpp"
+#include "aauto/session/InboundMessageAssembler.hpp"
+#include "aauto/session/OutboundMessageEncoder.hpp"
 #include "aauto/transport/ITransport.hpp"
 #include "aauto/crypto/ICryptoStrategy.hpp"
 #include "aauto/service/IService.hpp"
@@ -70,10 +73,16 @@ public:
     uint32_t session_id() const { return config_.session_id; }
 
 private:
+    bool is_handshake_state() const;
+    bool handle_handshake_message(uint16_t msg_type,
+                                  const std::vector<uint8_t>& payload);
+    void begin_disconnect();
+    void close_transport_and_services();
+    void complete_disconnect();
+
     // Read loop
     void start_read();
     void on_read_complete(const std::error_code& ec, std::size_t bytes);
-    void on_fragment(AapFragment frag);
     void dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
                             std::vector<uint8_t> payload);
 
@@ -102,7 +111,9 @@ private:
     std::shared_ptr<transport::ITransport>    transport_;
     std::shared_ptr<crypto::ICryptoStrategy>  crypto_;
     ISessionObserver*                         observer_;
-    Framer                                    framer_;
+    OutboundMessageEncoder                    outbound_encoder_;
+    InboundMessageAssembler                   inbound_assembler_;
+    HandshakeCoordinator                      handshake_coordinator_;
     SessionState                              state_ = SessionState::Idle;
 
     static constexpr std::size_t kMaxWriteQueueSize = 256;
@@ -112,9 +123,6 @@ private:
     bool                                      write_in_progress_ = false;
 
     std::map<uint8_t, std::shared_ptr<service::IService>> services_;
-
-    // Per-channel plaintext accumulator (decrypt per fragment, reassemble plaintext)
-    std::map<uint8_t, std::vector<uint8_t>>   channel_payloads_;
 
     asio::steady_timer                        state_timer_;
 };
