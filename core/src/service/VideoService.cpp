@@ -2,6 +2,7 @@
 
 #include "aauto/service/VideoService.hpp"
 #include "aauto/utils/Logger.hpp"
+#include "aauto/utils/ProtobufCompat.hpp"
 #include "aauto/utils/ProtocolConstants.hpp"
 
 #include <aap_protobuf/service/Service.pb.h>
@@ -23,10 +24,9 @@ namespace aauto::service {
 
 namespace pb_media = aap_protobuf::service::media;
 
-static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSizeLong());
-    msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
-    return buf;
+template <typename T>
+static std::vector<uint8_t> serialize(const T& msg) {
+    return utils::serialize_to_vector(msg);
 }
 
 // AAP video MEDIA_DATA payload is prefixed by an 8-byte int64 timestamp (us).

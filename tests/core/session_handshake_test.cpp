@@ -2,6 +2,7 @@
 
 #include "aauto/session/Session.hpp"
 #include "aauto/session/Framer.hpp"
+#include "aauto/utils/ProtobufCompat.hpp"
 #include "aauto/utils/ProtocolConstants.hpp"
 
 #include "mock/MockTransport.hpp"
@@ -24,10 +25,9 @@ namespace pb_ctrl = aap_protobuf::service::control::message;
 namespace pb_shared = aap_protobuf::shared;
 
 // Helper: serialize protobuf to byte vector
-static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSizeLong());
-    msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
-    return buf;
+template <typename T>
+static std::vector<uint8_t> serialize(const T& msg) {
+    return aauto::utils::serialize_to_vector(msg);
 }
 
 // Helper: build AAP wire frame with message type prefix

@@ -2,6 +2,7 @@
 
 #include "aauto/session/Session.hpp"
 #include "aauto/utils/Logger.hpp"
+#include "aauto/utils/ProtobufCompat.hpp"
 #include "aauto/utils/ProtocolUtil.hpp"
 
 #include <aap_protobuf/service/control/message/AuthResponse.pb.h>
@@ -13,10 +14,9 @@ namespace aauto::session {
 namespace pb_ctrl = aap_protobuf::service::control::message;
 
 // Helper: serialize protobuf to byte vector
-static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSizeLong());
-    msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
-    return buf;
+template <typename T>
+static std::vector<uint8_t> serialize(const T& msg) {
+    return utils::serialize_to_vector(msg);
 }
 
 Session::Session(asio::any_io_executor executor,

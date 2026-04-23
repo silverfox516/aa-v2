@@ -2,6 +2,7 @@
 
 #include "aauto/service/InputService.hpp"
 #include "aauto/utils/Logger.hpp"
+#include "aauto/utils/ProtobufCompat.hpp"
 #include "aauto/utils/ProtocolConstants.hpp"
 
 #include <aap_protobuf/service/Service.pb.h>
@@ -21,10 +22,9 @@ namespace aauto::service {
 namespace pb_input = aap_protobuf::service::inputsource::message;
 namespace pb_keybind = aap_protobuf::service::media::sink::message;
 
-static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSizeLong());
-    msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
-    return buf;
+template <typename T>
+static std::vector<uint8_t> serialize(const T& msg) {
+    return utils::serialize_to_vector(msg);
 }
 
 InputService::InputService(SendMessageFn send_fn, InputServiceConfig config)

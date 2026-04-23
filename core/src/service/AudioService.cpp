@@ -2,6 +2,7 @@
 
 #include "aauto/service/AudioService.hpp"
 #include "aauto/utils/Logger.hpp"
+#include "aauto/utils/ProtobufCompat.hpp"
 #include "aauto/utils/ProtocolConstants.hpp"
 
 #include <aap_protobuf/service/Service.pb.h>
@@ -21,10 +22,9 @@ namespace aauto::service {
 namespace pb_audio = aap_protobuf::service::media::sink::message;
 namespace pb_media = aap_protobuf::service::media;
 
-static std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSizeLong());
-    msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
-    return buf;
+template <typename T>
+static std::vector<uint8_t> serialize(const T& msg) {
+    return utils::serialize_to_vector(msg);
 }
 
 static constexpr std::size_t kAudioTimestampBytes = 8;

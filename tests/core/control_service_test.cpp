@@ -2,6 +2,7 @@
 
 #include "aauto/engine/HeadunitConfig.hpp"
 #include "aauto/service/ControlService.hpp"
+#include "aauto/utils/ProtobufCompat.hpp"
 #include "aauto/utils/ProtocolConstants.hpp"
 
 #include <aap_protobuf/service/Service.pb.h>
@@ -27,10 +28,9 @@ namespace pb_ctrl = aap_protobuf::service::control::message;
 
 namespace {
 
-std::vector<uint8_t> serialize(const google::protobuf::MessageLite& msg) {
-    std::vector<uint8_t> buf(msg.ByteSizeLong());
-    msg.SerializeToArray(buf.data(), static_cast<int>(buf.size()));
-    return buf;
+template <typename T>
+std::vector<uint8_t> serialize(const T& msg) {
+    return aauto::utils::serialize_to_vector(msg);
 }
 
 class FakePeerService : public IService {
