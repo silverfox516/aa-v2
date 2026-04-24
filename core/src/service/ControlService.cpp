@@ -76,6 +76,10 @@ ControlService::ControlService(
                     ? phone_name.substr(pos + 1) : phone_name;
                 session_tag_ += ":" + short_name;
                 aauto::set_session_tag(session_tag_);
+
+                if (phone_identified_cb_) {
+                    phone_identified_cb_(phone_name);
+                }
             }
             send_service_discovery_response();
         });

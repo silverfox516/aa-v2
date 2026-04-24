@@ -6,6 +6,10 @@
 - During bug fixes or improvements, keep the surrounding code clean — do not let incremental changes accumulate into messy code.
 - Prefer clear separation of concerns: transport, platform, service, and session layers must remain independent.
 - Avoid mixing responsibilities within a single class.
+- No band-aid fixes. When a bug or design gap is found, trace it to the root cause
+  and fix the underlying structure — do not add conditional checks or flags to work
+  around a fundamentally wrong abstraction. If the fix requires a larger refactoring,
+  plan and execute that refactoring rather than accumulating workarounds.
 
 ## Language
 

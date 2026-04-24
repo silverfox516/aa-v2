@@ -23,33 +23,41 @@ import com.aauto.engine.IAAEngineCallback;
 
 /**
  * Background service bridging the Android app with aa-engine daemon.
- * Manages both USB and wireless AA connections.
+ * Manages USB and wireless AA connections via SessionManager.
+ *
+ * Session lifecycle:
+ *   Transport connected → session created (CONNECTING)
+ *   → AAP handshake → ServiceDiscovery → phone identified (CONNECTED)
+ *   → user taps → VideoFocus(PROJECTED) (ACTIVE)
+ *   → "exit" button → VideoFocus(NATIVE) (CONNECTED)
+ *   → transport disconnected → session removed
  */
 public class AaService extends Service
         implements UsbMonitor.Listener,
         WirelessSessionCoordinator.Callback,
-        EngineConnectionManager.Callback,
-        SessionLifecycleController.Callback {
+        EngineConnectionManager.Callback {
     private static final String TAG = "AA.Service";
-    private static final int ENGINE_CONNECT_RETRY_MS = 2000;
-    private static final int ENGINE_CONNECT_MAX_RETRIES = 10;
     private static final int TCP_PORT = 5277;
 
     private UsbMonitor usbMonitor;
     private volatile IAAEngine engineProxy;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final SessionManager sessionManager = new SessionManager();
 
-    // USB state
-    private UsbDevice availableDevice;
+    // Track which session_id belongs to which transport event.
+    // NOT transport-type logic — just remembering "I created session X for USB"
+    // so that when USB detaches, I know to remove session X.
+    private int usbSessionId = -1;
+    private int wirelessSessionId = -1;
 
-    // Wireless state
+    private UsbDevice availableUsbDevice;
     private BtProfileGate btProfileGate;
     private final WirelessStateTracker wirelessState = new WirelessStateTracker();
     private final HotspotConfigProvider hotspotConfigProvider = new HotspotConfigProvider();
     private WirelessSessionCoordinator wirelessCoordinator;
     private EngineConnectionManager engineConnectionManager;
-    private SessionLifecycleController sessionLifecycleController;
     private UiNavigationController uiNavigationController;
+    private final PlaybackController playbackController = new PlaybackController();
 
     public interface DeviceStateListener {
         void onDeviceStateChanged();
@@ -75,12 +83,12 @@ public class AaService extends Service
 
     private final LocalBinder binder = new LocalBinder();
 
-    private final PlaybackController playbackController = new PlaybackController();
-
     public static final String ACTION_SESSION_ENDED = "com.aauto.app.SESSION_ENDED";
+    public static final String ACTION_VIDEO_FOCUS_CHANGED = "com.aauto.app.VIDEO_FOCUS_CHANGED";
+    public static final String EXTRA_PROJECTED = "projected";
 
-    // Binder callbacks arrive on a Binder thread pool. Capture local
-    // references before use to prevent TOCTOU race with onDestroy().
+    // ===== Engine callbacks (Binder thread) =====
+
     private final IAAEngineCallback.Stub engineCallback =
             new IAAEngineCallback.Stub() {
         @Override
@@ -90,37 +98,54 @@ public class AaService extends Service
 
         @Override
         public void onSessionError(int sessionId, int errorCode, String message) {
-            Log.e(TAG, "session " + sessionId + " error " + errorCode +
-                    ": " + message);
-            SessionLifecycleController slc = sessionLifecycleController;
-            if (slc != null) {
-                slc.cleanupSession();
-            }
+            Log.e(TAG, "session " + sessionId + " error " + errorCode
+                    + ": " + message);
+            handler.post(() -> removeSession(sessionId));
         }
 
         @Override
         public void onSessionConfig(int sessionId, int videoWidth, int videoHeight) {
             Log.i(TAG, "session config: " + videoWidth + "x" + videoHeight);
-            PlaybackController pc = playbackController;
-            if (pc != null) pc.onSessionConfig(videoWidth, videoHeight);
+            playbackController.onSessionConfig(videoWidth, videoHeight);
         }
 
         @Override
         public void onVideoData(int sessionId, byte[] data, long timestampUs,
                                 boolean isConfig) {
-            PlaybackController pc = playbackController;
-            if (pc != null) pc.onVideoData(data, timestampUs, isConfig);
+            playbackController.onVideoData(data, timestampUs, isConfig);
         }
 
         @Override
         public void onAudioData(int sessionId, int streamType, byte[] data,
                                 long timestampUs) {
-            PlaybackController pc = playbackController;
-            if (pc != null) pc.onAudioData(streamType, data);
+            playbackController.onAudioData(streamType, data);
+        }
+
+        @Override
+        public void onPhoneIdentified(int sessionId, String deviceName) {
+            Log.i(TAG, "phone identified: session=" + sessionId
+                    + " name=" + deviceName);
+            handler.post(() -> {
+                sessionManager.onPhoneIdentified(sessionId, deviceName);
+                notifyDeviceStateChanged();
+            });
+        }
+
+        @Override
+        public void onVideoFocusChanged(int sessionId, boolean projected) {
+            Log.i(TAG, "video focus changed: session=" + sessionId
+                    + " projected=" + projected);
+            handler.post(() -> {
+                sessionManager.onVideoFocusChanged(sessionId, projected);
+                Intent intent = new Intent(ACTION_VIDEO_FOCUS_CHANGED);
+                intent.putExtra(EXTRA_PROJECTED, projected);
+                sendBroadcast(intent);
+                notifyDeviceStateChanged();
+            });
         }
     };
 
-    // ===== WiFi AP state receiver =====
+    // ===== WiFi AP / BT state receivers =====
 
     private final BroadcastReceiver apStateReceiver = new BroadcastReceiver() {
         @Override
@@ -138,8 +163,6 @@ public class AaService extends Service
         }
     };
 
-    // ===== BT state receiver =====
-
     private final BroadcastReceiver btStateReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -156,39 +179,28 @@ public class AaService extends Service
         }
     };
 
+    // ===== Service lifecycle =====
+
     @Override
     public void onCreate() {
         super.onCreate();
         Log.i(TAG, "AaService created");
         uiNavigationController = new UiNavigationController(this);
-        sessionLifecycleController = new SessionLifecycleController(
-                this,
-                wirelessState,
-                playbackController,
-                this);
         engineConnectionManager = new EngineConnectionManager(
-                handler,
-                engineCallback,
-                this,
-                ENGINE_CONNECT_RETRY_MS,
-                ENGINE_CONNECT_MAX_RETRIES);
+                handler, engineCallback, this, 2000, 10);
         engineConnectionManager.connect();
         usbMonitor = new UsbMonitor(this, this);
         usbMonitor.start();
 
         btProfileGate = new BtProfileGate(this);
         wirelessCoordinator = new WirelessSessionCoordinator(
-                this,
-                wirelessState,
-                hotspotConfigProvider,
-                btProfileGate,
-                this);
+                this, wirelessState, hotspotConfigProvider,
+                btProfileGate, this);
 
         registerReceiver(apStateReceiver,
                 new IntentFilter("android.net.wifi.WIFI_AP_STATE_CHANGED"));
         registerReceiver(btStateReceiver,
                 new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED));
-
         startWirelessListeningIfReady();
     }
 
@@ -206,7 +218,6 @@ public class AaService extends Service
             engineConnectionManager.shutdown();
             engineConnectionManager = null;
         }
-        sessionLifecycleController = null;
         uiNavigationController = null;
         btProfileGate = null;
         try { unregisterReceiver(apStateReceiver); } catch (Exception ignored) {}
@@ -215,9 +226,7 @@ public class AaService extends Service
     }
 
     @Override
-    public IBinder onBind(Intent intent) {
-        return binder;
-    }
+    public IBinder onBind(Intent intent) { return binder; }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -229,28 +238,44 @@ public class AaService extends Service
     @Override
     public void onDeviceAvailable(UsbDevice device) {
         Log.i(TAG, "USB device available: " + device.getProductName());
-        availableDevice = device;
-        notifyDeviceStateChanged();
-        if (uiNavigationController != null) {
-            uiNavigationController.showDeviceList();
+        availableUsbDevice = device;
+
+        // Auto-connect: open USB and start session immediately
+        if (!usbMonitor.connectPendingDevice()) {
+            Log.e(TAG, "failed to open USB device");
+            notifyDeviceStateChanged();
+            return;
         }
+        // onDeviceReady will be called next
     }
 
     @Override
     public void onDeviceReady(int fd, int epIn, int epOut) {
-        if (sessionLifecycleController != null) {
-            sessionLifecycleController.startUsbSession(engineProxy, fd, epIn, epOut);
+        if (engineProxy == null) {
+            Log.e(TAG, "engine not connected, cannot start USB session");
+            return;
         }
+        try {
+            ParcelFileDescriptor pfd = ParcelFileDescriptor.adoptFd(fd);
+            int sid = engineProxy.startSession(pfd, epIn, epOut);
+            if (sid > 0) {
+                usbSessionId = sid;
+                sessionManager.createSession(sid, "USB");
+                Log.i(TAG, "USB session started: id=" + sid);
+            }
+        } catch (RemoteException e) {
+            Log.e(TAG, "failed to start USB session", e);
+        }
+        notifyDeviceStateChanged();
     }
 
     @Override
     public void onDeviceRemoved() {
         Log.i(TAG, "USB device removed");
-        availableDevice = null;
-        if (sessionLifecycleController != null
-                && sessionLifecycleController.hasActiveSession()) {
-            sessionLifecycleController.stopActiveSession(engineProxy);
-            sessionLifecycleController.cleanupSession();
+        availableUsbDevice = null;
+        if (usbSessionId > 0) {
+            stopAndRemoveSession(usbSessionId);
+            usbSessionId = -1;
         }
         notifyDeviceStateChanged();
     }
@@ -265,24 +290,31 @@ public class AaService extends Service
     @Override
     public void onWirelessReadyToStartSession(String deviceId, String deviceName) {
         Log.i(TAG, "wireless ready: " + deviceId + " (" + deviceName + ")");
-        if (sessionLifecycleController != null) {
-            sessionLifecycleController.startWirelessSession(engineProxy, TCP_PORT);
-            if (sessionLifecycleController.hasActiveSession()
-                    && uiNavigationController != null) {
-                uiNavigationController.showDisplayFlow();
-            }
+        if (engineProxy == null) {
+            Log.e(TAG, "engine not connected, cannot start wireless session");
+            return;
         }
+        try {
+            int sid = engineProxy.startTcpSession(TCP_PORT);
+            if (sid > 0) {
+                wirelessSessionId = sid;
+                sessionManager.createSession(sid, "Wireless");
+                Log.i(TAG, "wireless session started: id=" + sid);
+            }
+        } catch (RemoteException e) {
+            Log.e(TAG, "failed to start wireless session", e);
+        }
+        notifyDeviceStateChanged();
     }
 
     @Override
     public void onWirelessDisconnected(String deviceId, String reason) {
         Log.i(TAG, "wireless disconnected: " + deviceId + " — " + reason);
-
-        if (sessionLifecycleController != null
-                && sessionLifecycleController.hasActiveSession()) {
-            sessionLifecycleController.stopActiveSession(engineProxy);
-            sessionLifecycleController.cleanupSession();
+        if (wirelessSessionId > 0) {
+            stopAndRemoveSession(wirelessSessionId);
+            wirelessSessionId = -1;
         }
+        notifyDeviceStateChanged();
     }
 
     // ===== EngineConnectionManager.Callback =====
@@ -297,10 +329,24 @@ public class AaService extends Service
         engineProxy = null;
     }
 
-    // ===== SessionLifecycleController.Callback =====
+    // ===== Session management =====
 
-    @Override
-    public void onSessionStateChanged() {
+    private void stopAndRemoveSession(int sessionId) {
+        if (engineProxy != null) {
+            try { engineProxy.stopSession(sessionId); }
+            catch (RemoteException e) { Log.w(TAG, "stopSession failed", e); }
+        }
+        removeSession(sessionId);
+    }
+
+    private void removeSession(int sessionId) {
+        SessionManager.SessionEntry entry = sessionManager.removeSession(sessionId);
+        if (entry != null && entry.state == SessionManager.SessionState.ACTIVE) {
+            playbackController.clearSessionPlayback();
+            sendBroadcast(new Intent(ACTION_SESSION_ENDED));
+        }
+        if (sessionId == usbSessionId) usbSessionId = -1;
+        if (sessionId == wirelessSessionId) wirelessSessionId = -1;
         notifyDeviceStateChanged();
     }
 
@@ -320,25 +366,8 @@ public class AaService extends Service
 
     // ===== Public API for Activity =====
 
-    public UsbDevice getAvailableDevice() {
-        return availableDevice;
-    }
-
-    public String getWirelessDeviceName() {
-        return wirelessState.getDeviceName();
-    }
-
-    public boolean isWirelessConnecting() {
-        return wirelessState.isConnecting();
-    }
-
-    public boolean isWirelessReady() {
-        return wirelessState.isReady();
-    }
-
-    public boolean hasActiveSession() {
-        return sessionLifecycleController != null
-                && sessionLifecycleController.hasActiveSession();
+    public SessionManager getSessionManager() {
+        return sessionManager;
     }
 
     public boolean isBluetoothEnabled() {
@@ -348,43 +377,103 @@ public class AaService extends Service
 
     public boolean isWifiApEnabled() {
         WifiManager wm = (WifiManager) getSystemService(Context.WIFI_SERVICE);
-        return wm.getWifiApState() == WifiManager.WIFI_AP_STATE_ENABLED;
+        return wm != null && wm.getWifiApState() == WifiManager.WIFI_AP_STATE_ENABLED;
     }
 
     /**
-     * Connect to the available USB device and start AA session.
+     * Activate a session — deactivate current ACTIVE (if any), then activate new.
+     * Sends VideoFocus(NATIVE) to old, VideoFocus(PROJECTED) to new.
      */
-    public void connectDevice() {
-        if (availableDevice == null) {
-            Log.w(TAG, "no available device");
+    public void activateSession(int sessionId) {
+        if (engineProxy == null) return;
+        SessionManager.SessionEntry entry = sessionManager.getSession(sessionId);
+        if (entry == null || entry.state == SessionManager.SessionState.CONNECTING) {
+            Log.w(TAG, "session " + sessionId + " not ready to activate");
             return;
         }
-        if (!usbMonitor.connectPendingDevice()) {
-            Log.e(TAG, "failed to open USB device");
-            return;
+        try {
+            // Deactivate current ACTIVE/BACKGROUND session (if different)
+            for (SessionManager.SessionEntry e : sessionManager.getAll()) {
+                if ((e.state == SessionManager.SessionState.ACTIVE
+                        || e.state == SessionManager.SessionState.BACKGROUND)
+                        && e.sessionId != sessionId) {
+                    Log.i(TAG, "deactivating session " + e.sessionId);
+                    engineProxy.setVideoFocus(e.sessionId, false);
+                    engineProxy.detachAllSinks(e.sessionId);
+                    sessionManager.deactivate(e.sessionId);
+                }
+            }
+            // Prepare session — attach sinks, open display.
+            // VideoFocus(PROJECTED) will be sent when Surface is ready.
+            engineProxy.attachAllSinks(sessionId);
+            sessionManager.activate(sessionId);
+            if (uiNavigationController != null) {
+                uiNavigationController.showDisplayFlow();
+            }
+        } catch (RemoteException e) {
+            Log.e(TAG, "activateSession failed", e);
         }
-        if (uiNavigationController != null) {
-            uiNavigationController.showDisplayFlow();
+    }
+
+    /**
+     * Surface is ready — send VideoFocus(PROJECTED) to the ACTIVE session.
+     */
+    public void onSurfaceReady() {
+        if (engineProxy == null) return;
+        for (SessionManager.SessionEntry e : sessionManager.getAll()) {
+            if (e.state == SessionManager.SessionState.ACTIVE) {
+                Log.i(TAG, "surface ready, sending PROJECTED for session "
+                        + e.sessionId);
+                try {
+                    engineProxy.setVideoFocus(e.sessionId, true);
+                } catch (RemoteException ex) {
+                    Log.w(TAG, "setVideoFocus failed", ex);
+                }
+                return;
+            }
         }
+    }
+
+    /**
+     * Surface destroyed — send VideoFocus(NATIVE) to the ACTIVE session.
+     */
+    public void onSurfaceDestroyed() {
+        if (engineProxy == null) return;
+        for (SessionManager.SessionEntry e : sessionManager.getAll()) {
+            if (e.state == SessionManager.SessionState.ACTIVE) {
+                Log.i(TAG, "surface destroyed, sending NATIVE for session "
+                        + e.sessionId);
+                try {
+                    engineProxy.setVideoFocus(e.sessionId, false);
+                    sessionManager.onVideoFocusChanged(e.sessionId, false);
+                } catch (RemoteException ex) {
+                    Log.w(TAG, "setVideoFocus failed", ex);
+                }
+            }
+        }
+        notifyDeviceStateChanged();
     }
 
     public int getVideoWidth() { return playbackController.getVideoWidth(); }
     public int getVideoHeight() { return playbackController.getVideoHeight(); }
 
     public void sendTouchEvent(int x, int y, int action) {
-        if (engineProxy == null || sessionLifecycleController == null) return;
-        int currentSessionId = sessionLifecycleController.getCurrentSessionId();
-        if (currentSessionId <= 0) return;
-        try {
-            engineProxy.sendTouchEvent(currentSessionId, x, y, action);
-        } catch (RemoteException e) {
-            Log.w(TAG, "sendTouchEvent failed", e);
+        // Send to the ACTIVE session
+        for (SessionManager.SessionEntry e : sessionManager.getAll()) {
+            if (e.state == SessionManager.SessionState.ACTIVE && engineProxy != null) {
+                try {
+                    engineProxy.sendTouchEvent(e.sessionId, x, y, action);
+                } catch (RemoteException ex) {
+                    Log.w(TAG, "sendTouchEvent failed", ex);
+                }
+                return;
+            }
         }
     }
 
     public void setSurface(Surface surface) {
         playbackController.setSurface(surface);
-        Log.i(TAG, "setSurface: " + (surface != null ? "decoder ready" : "decoder released"));
+        Log.i(TAG, "setSurface: " + (surface != null ? "decoder ready"
+                : "decoder released"));
     }
-
 }

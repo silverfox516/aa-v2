@@ -68,6 +68,9 @@ public:
 
     /// Forward touch event to input service(s).
     void send_touch_event(int32_t x, int32_t y, int32_t action);
+    void set_video_focus(bool projected);
+    void attach_all_sinks();
+    void detach_all_sinks();
 
     SessionState state() const;
     uint32_t session_id() const { return config_.session_id; }

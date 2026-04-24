@@ -18,9 +18,10 @@ class PlaybackController {
     }
 
     void onVideoData(byte[] data, long timestampUs, boolean isConfig) {
-        if (videoDecoder != null) {
-            videoDecoder.feedData(data, timestampUs, isConfig);
-        }
+        if (videoDecoder == null) return;
+        // Open decoder on first data if not already open
+        if (!videoDecoder.open()) return;
+        videoDecoder.feedData(data);
     }
 
     void onAudioData(int streamType, byte[] data) {
@@ -38,12 +39,6 @@ class PlaybackController {
         } else if (videoDecoder != null) {
             videoDecoder.release();
             videoDecoder = null;
-        }
-    }
-
-    void attachPendingSurfaceIfNeeded() {
-        if (pendingSurface != null) {
-            setSurface(pendingSurface);
         }
     }
 

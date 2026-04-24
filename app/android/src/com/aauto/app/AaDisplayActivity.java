@@ -39,8 +39,10 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
         Intent serviceIntent = new Intent(this, AaService.class);
         bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE);
 
-        registerReceiver(sessionEndReceiver,
-                new IntentFilter(AaService.ACTION_SESSION_ENDED));
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(AaService.ACTION_SESSION_ENDED);
+        filter.addAction(AaService.ACTION_VIDEO_FOCUS_CHANGED);
+        registerReceiver(sessionEndReceiver, filter);
 
         Log.i(TAG, "AaDisplayActivity created");
     }
@@ -55,8 +57,18 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
     private final BroadcastReceiver sessionEndReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            Log.i(TAG, "session ended, finishing");
-            finish();
+            String action = intent.getAction();
+            if (AaService.ACTION_SESSION_ENDED.equals(action)) {
+                Log.i(TAG, "session ended, finishing");
+                finish();
+            } else if (AaService.ACTION_VIDEO_FOCUS_CHANGED.equals(action)) {
+                boolean projected = intent.getBooleanExtra(
+                        AaService.EXTRA_PROJECTED, true);
+                if (!projected) {
+                    Log.i(TAG, "video focus lost, finishing");
+                    finish();
+                }
+            }
         }
     };
 
@@ -81,6 +93,7 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
         surfaceReady = false;
         if (aaService != null) {
             aaService.setSurface(null);
+            aaService.onSurfaceDestroyed();
         }
     }
 
@@ -105,6 +118,7 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
     private void trySendSurface() {
         if (aaService != null && surfaceReady) {
             aaService.setSurface(surfaceView.getHolder().getSurface());
+            aaService.onSurfaceReady();
         }
     }
 

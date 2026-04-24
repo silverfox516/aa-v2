@@ -100,12 +100,15 @@ public:
         const uint8_t* data, std::size_t size, int64_t ts, bool is_config)>;
     using AudioDataCb = std::function<void(uint32_t session_id,
         uint32_t stream_type, const uint8_t* data, std::size_t size, int64_t ts)>;
+    using VideoFocusCb = std::function<void(uint32_t session_id, bool projected)>;
 
     AndroidServiceFactory(const engine::HeadunitConfig& config,
-                          VideoDataCb video_cb, AudioDataCb audio_cb)
+                          VideoDataCb video_cb, AudioDataCb audio_cb,
+                          VideoFocusCb focus_cb)
         : hu_(config)
         , video_cb_(std::move(video_cb))
-        , audio_cb_(std::move(audio_cb)) {}
+        , audio_cb_(std::move(audio_cb))
+        , focus_cb_(std::move(focus_cb)) {}
 
     std::map<int32_t, std::shared_ptr<service::IService>>
     create_services(service::SendMessageFn send_fn) override {
@@ -114,23 +117,29 @@ public:
         // Channel 1: Video — forward H.264 NALUs to app via AIDL callback
         service::VideoServiceConfig vcfg{
             hu_.video_width, hu_.video_height, hu_.video_fps, hu_.video_density};
+        uint32_t sid = current_session_id_;
         auto video_sink = std::make_shared<sink::CallbackVideoSink>(
-            [this](const uint8_t* data, std::size_t size,
+            [this, sid](const uint8_t* data, std::size_t size,
                    int64_t ts, bool is_config) {
-                if (video_cb_) video_cb_(current_session_id_, data, size, ts, is_config);
+                if (video_cb_) video_cb_(sid, data, size, ts, is_config);
             });
         std::vector<std::shared_ptr<sink::IVideoSink>> video_sinks;
         video_sinks.push_back(video_sink);
-        services[1] = std::make_shared<service::VideoService>(
+        auto video_svc = std::make_shared<service::VideoService>(
             send_fn, vcfg, std::move(video_sinks));
+        video_svc->set_video_focus_callback(
+            [this, sid](bool projected) {
+                if (focus_cb_) focus_cb_(sid, projected);
+            });
+        services[1] = video_svc;
 
         // Channel 2-4: Audio — forward PCM to app via callback
         auto make_audio = [&](int ch, sink::AudioStreamType st,
                               uint32_t rate, uint32_t bits, uint32_t channels) {
             auto audio_sink = std::make_shared<sink::CallbackAudioSink>(
-                [this](uint32_t stream_type, const uint8_t* data,
+                [this, sid](uint32_t stream_type, const uint8_t* data,
                        std::size_t size, int64_t ts) {
-                    if (audio_cb_) audio_cb_(current_session_id_, stream_type,
+                    if (audio_cb_) audio_cb_(sid, stream_type,
                                             data, size, ts);
                 });
             std::vector<std::shared_ptr<sink::IAudioSink>> sinks;
@@ -158,12 +167,13 @@ public:
         return services;
     }
 
-    void set_session_id(uint32_t id) { current_session_id_ = id; }
+    void set_session_id(uint32_t id) override { current_session_id_ = id; }
 
 private:
     engine::HeadunitConfig hu_;
     VideoDataCb video_cb_;
     AudioDataCb audio_cb_;
+    VideoFocusCb focus_cb_;
     uint32_t current_session_id_ = 0;
 };
 
@@ -211,6 +221,10 @@ int main(int /*argc*/, char* /*argv*/[]) {
         [&aidl_raw](uint32_t sid, uint32_t stream_type,
                     const uint8_t* data, std::size_t size, int64_t ts) {
             if (aidl_raw) aidl_raw->on_audio_data(sid, stream_type, data, size, ts);
+        },
+        // Video focus callback
+        [&aidl_raw](uint32_t sid, bool projected) {
+            if (aidl_raw) aidl_raw->on_video_focus_changed(sid, projected);
         }
     );
 

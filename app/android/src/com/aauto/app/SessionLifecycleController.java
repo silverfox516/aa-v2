@@ -22,6 +22,7 @@ class SessionLifecycleController {
 
     private int currentSessionId = -1;
     private boolean isWirelessSession;
+    private volatile boolean videoFocusActive;
 
     SessionLifecycleController(Context context,
                                WirelessStateTracker wirelessStateTracker,
@@ -41,6 +42,18 @@ class SessionLifecycleController {
         return currentSessionId;
     }
 
+    boolean isWirelessSession() {
+        return isWirelessSession;
+    }
+
+    boolean isVideoFocusActive() {
+        return videoFocusActive;
+    }
+
+    void setVideoFocusActive(boolean active) {
+        this.videoFocusActive = active;
+    }
+
     void startUsbSession(IAAEngine engineProxy, int fd, int epIn, int epOut) {
         if (engineProxy == null) {
             Log.e(TAG, "engine not connected, cannot start USB session");
@@ -52,7 +65,6 @@ class SessionLifecycleController {
             isWirelessSession = false;
             Log.i(TAG, "USB session started: id=" + currentSessionId);
             if (currentSessionId > 0) {
-                playbackController.attachPendingSurfaceIfNeeded();
                 callback.onSessionStateChanged();
             }
         } catch (RemoteException e) {
@@ -70,7 +82,6 @@ class SessionLifecycleController {
             isWirelessSession = true;
             Log.i(TAG, "wireless session started: id=" + currentSessionId);
             if (currentSessionId > 0) {
-                playbackController.attachPendingSurfaceIfNeeded();
                 callback.onSessionStateChanged();
             }
         } catch (RemoteException e) {

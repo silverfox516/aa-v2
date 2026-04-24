@@ -29,4 +29,10 @@ interface IAAEngineCallback {
      */
     oneway void onAudioData(int sessionId, int streamType, in byte[] data,
                             long timestampUs);
+
+    /** Phone identified after ServiceDiscovery. */
+    void onPhoneIdentified(int sessionId, String deviceName);
+
+    /** Phone requested video focus change (e.g., "exit" button pressed). */
+    void onVideoFocusChanged(int sessionId, boolean projected);
 }

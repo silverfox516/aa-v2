@@ -138,8 +138,23 @@ void AudioService::on_codec_config(const uint8_t* data, std::size_t size) {
     }
 }
 
+void AudioService::attach_sinks() {
+    sinks_active_ = true;
+    AA_LOG_I("audio sinks attached (stream %d)",
+             static_cast<int>(audio_config_.stream_type));
+}
+
+void AudioService::detach_sinks() {
+    sinks_active_ = false;
+    AA_LOG_I("audio sinks detached (stream %d)",
+             static_cast<int>(audio_config_.stream_type));
+}
+
 void AudioService::on_data(const uint8_t* data, std::size_t size) {
-    if (!started_) return;
+    if (!started_ || !sinks_active_) {
+        send_ack();
+        return;
+    }
 
     int64_t timestamp_us = 0;
     const uint8_t* pcm_data = data;

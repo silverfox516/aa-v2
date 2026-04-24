@@ -40,6 +40,7 @@ public:
 class IServiceFactory {
 public:
     virtual ~IServiceFactory() = default;
+    virtual void set_session_id(uint32_t id) = 0;
     virtual std::map<int32_t, std::shared_ptr<service::IService>>
         create_services(service::SendMessageFn send_fn) = 0;
 };
@@ -67,6 +68,9 @@ public:
     void stop_all() override;
     void set_active_session(uint32_t session_id) override;
     void set_video_surface(uint32_t session_id, void* native_window) override;
+    void set_video_focus(uint32_t session_id, bool projected) override;
+    void attach_all_sinks(uint32_t session_id) override;
+    void detach_all_sinks(uint32_t session_id) override;
     void send_touch_event(uint32_t session_id,
                           int32_t x, int32_t y, int32_t action) override;
 

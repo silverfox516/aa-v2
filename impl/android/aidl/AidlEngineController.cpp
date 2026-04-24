@@ -133,6 +133,23 @@ android::binder::Status AidlEngineController::sendTouchEvent(
     return android::binder::Status::ok();
 }
 
+android::binder::Status AidlEngineController::setVideoFocus(
+        int32_t sessionId, bool projected) {
+    AA_LOG_I("setVideoFocus: session=%d projected=%d", sessionId, projected);
+    engine_->set_video_focus(static_cast<uint32_t>(sessionId), projected);
+    return android::binder::Status::ok();
+}
+
+android::binder::Status AidlEngineController::attachAllSinks(int32_t sessionId) {
+    engine_->attach_all_sinks(static_cast<uint32_t>(sessionId));
+    return android::binder::Status::ok();
+}
+
+android::binder::Status AidlEngineController::detachAllSinks(int32_t sessionId) {
+    engine_->detach_all_sinks(static_cast<uint32_t>(sessionId));
+    return android::binder::Status::ok();
+}
+
 android::binder::Status AidlEngineController::stopSession(int32_t sessionId) {
     AA_LOG_I("stopSession: id=%d", sessionId);
     engine_->stop_session(static_cast<uint32_t>(sessionId));
@@ -179,10 +196,17 @@ void AidlEngineController::on_session_error(
 }
 
 void AidlEngineController::on_phone_identified(
-        uint32_t /*session_id*/,
+        uint32_t session_id,
         const std::string& device_name,
         const std::string& /*instance_id*/) {
-    AA_LOG_I("phone identified: %s", device_name.c_str());
+    AA_LOG_I("phone identified: session=%u name=%s",
+             session_id, device_name.c_str());
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (callback_ != nullptr) {
+        callback_->onPhoneIdentified(
+            static_cast<int32_t>(session_id),
+            android::String16(device_name.c_str()));
+    }
 }
 
 // ===== Media callbacks — direct Binder call (oneway, non-blocking) =====
@@ -214,5 +238,16 @@ void AidlEngineController::on_audio_data(
         vec, timestamp_us);
 }
 
+
+void AidlEngineController::on_video_focus_changed(
+        uint32_t session_id, bool projected) {
+    AA_LOG_I("video focus changed: session=%u projected=%d",
+             session_id, projected);
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (callback_ != nullptr) {
+        callback_->onVideoFocusChanged(
+            static_cast<int32_t>(session_id), projected);
+    }
+}
 
 } // namespace aauto::impl

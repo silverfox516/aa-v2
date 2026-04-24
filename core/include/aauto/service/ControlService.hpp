@@ -26,6 +26,7 @@ namespace aauto::service {
 class ControlService : public ServiceBase {
 public:
     using SessionCloseCallback = std::function<void()>;
+    using PhoneIdentifiedCallback = std::function<void(const std::string& device_name)>;
 
     ControlService(asio::any_io_executor executor,
                    SendMessageFn send_fn,
@@ -39,6 +40,10 @@ public:
 
     void set_session_close_callback(SessionCloseCallback cb) {
         session_close_cb_ = std::move(cb);
+    }
+
+    void set_phone_identified_callback(PhoneIdentifiedCallback cb) {
+        phone_identified_cb_ = std::move(cb);
     }
 
     void set_log_tag(std::string tag) { session_tag_ = std::move(tag); }
@@ -57,6 +62,7 @@ private:
     const engine::HeadunitConfig& hu_config_;
     std::map<int32_t, std::shared_ptr<IService>> peer_services_;
     SessionCloseCallback session_close_cb_;
+    PhoneIdentifiedCallback phone_identified_cb_;
     std::string session_tag_;
 
     // Heartbeat

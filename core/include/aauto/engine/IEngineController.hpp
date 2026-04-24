@@ -27,6 +27,7 @@ public:
     virtual void on_session_error(uint32_t session_id,
                                   const std::error_code& ec,
                                   const std::string& detail) = 0;
+    /// Phone identified after ServiceDiscovery.
     virtual void on_phone_identified(uint32_t session_id,
                                      const std::string& device_name,
                                      const std::string& instance_id) = 0;
@@ -40,6 +41,9 @@ public:
     virtual void on_audio_data(uint32_t session_id, uint32_t stream_type,
                                const uint8_t* data, std::size_t size,
                                int64_t timestamp_us) = 0;
+
+    /// Phone requested video focus change (exit button, etc.)
+    virtual void on_video_focus_changed(uint32_t session_id, bool projected) = 0;
 };
 
 /// Driving port: app -> engine commands.
@@ -73,6 +77,13 @@ public:
     /// Pass nullptr to detach. Platform layer casts to ANativeWindow* (Android)
     /// or equivalent. Core treats it as opaque pointer.
     virtual void set_video_surface(uint32_t session_id, void* native_window) = 0;
+
+    /// Set video focus: true=PROJECTED (phone sends video), false=NATIVE
+    virtual void set_video_focus(uint32_t session_id, bool projected) = 0;
+
+    /// Attach/detach ALL sinks (video + audio). Used for session switching.
+    virtual void attach_all_sinks(uint32_t session_id) = 0;
+    virtual void detach_all_sinks(uint32_t session_id) = 0;
 };
 
 } // namespace aauto::engine

@@ -64,6 +64,13 @@ public:
     /// Send touch event. Only meaningful for input services.
     virtual void send_touch(int32_t /*x*/, int32_t /*y*/, int32_t /*action*/) {}
 
+    /// Set video focus. Only meaningful for video services.
+    virtual void set_video_focus(bool /*projected*/) {}
+
+    /// Activate media sinks. Only ACTIVE session should have sinks attached.
+    virtual void attach_sinks() {}
+    virtual void detach_sinks() {}
+
     virtual ServiceType type() const = 0;
 
     /// Fill this service's ServiceConfiguration for ServiceDiscoveryResponse.

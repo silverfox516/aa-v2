@@ -1,6 +1,7 @@
 package com.aauto.app;
 
 import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.util.Log;
 import android.view.Surface;
@@ -9,26 +10,23 @@ import java.nio.ByteBuffer;
 
 /**
  * H.264 video decoder using Android MediaCodec.
- * Receives compressed NALUs from aa-engine daemon via AIDL callback,
- * decodes and renders to the provided Surface.
  *
- * Input (feedData) and output (drain) run on separate threads:
- * - feedData: called from Binder thread, submits to decoder input queue
- * - outputThread: continuously drains decoded frames to Surface
+ * Single-threaded model (matching reference): pushData handles both
+ * input queueing and output draining in one call. No separate output
+ * thread, no threading issues, no IDR frame drops during reconfiguration.
+ *
+ * Called from Binder thread (AIDL callback).
  */
 public class VideoDecoder {
     private static final String TAG = "AA.VideoDecoder";
     private static final String MIME_H264 = "video/avc";
-    private static final long INPUT_TIMEOUT_US = 1000;   // 1ms
-    private static final long OUTPUT_TIMEOUT_US = 1000;   // 1ms
+    private static final long INPUT_TIMEOUT_US = 10000;  // 10ms
 
     private int videoWidth = 800;
     private int videoHeight = 480;
     private MediaCodec codec;
     private Surface surface;
-    private volatile boolean configured;
-    private volatile boolean running;
-    private Thread outputThread;
+    private boolean configured;
 
     public void setSurface(Surface surface) {
         this.surface = surface;
@@ -40,98 +38,76 @@ public class VideoDecoder {
         this.videoHeight = height;
     }
 
-    public void feedData(byte[] data, long timestampUs, boolean isConfig) {
-        if (surface == null) return;
-
-        if (isConfig) {
-            configureCodec(data);
-            return;
+    /**
+     * Open the decoder with the given dimensions.
+     * CSD (SPS/PPS) is not set here — it arrives in the stream via feedData.
+     */
+    public boolean open() {
+        if (configured) return true;
+        if (surface == null) {
+            Log.e(TAG, "no surface set");
+            return false;
         }
+        try {
+            codec = MediaCodec.createDecoderByType(MIME_H264);
+            MediaFormat format = MediaFormat.createVideoFormat(
+                    MIME_H264, videoWidth, videoHeight);
+            format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+            codec.configure(format, surface, null, 0);
+            codec.start();
+            configured = true;
+            Log.i(TAG, "decoder opened: " + videoWidth + "x" + videoHeight);
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "failed to open decoder", e);
+            codec = null;
+            return false;
+        }
+    }
 
-        if (codec == null || !configured) return;
+    /**
+     * Feed compressed H.264 data (including SPS/PPS and frame data).
+     * Queues input and immediately drains any available output to Surface.
+     */
+    public void feedData(byte[] data) {
+        if (!configured || codec == null || data == null) return;
 
         try {
-            int idx = codec.dequeueInputBuffer(INPUT_TIMEOUT_US);
-            if (idx < 0) return;
+            int inputIdx = codec.dequeueInputBuffer(INPUT_TIMEOUT_US);
+            if (inputIdx < 0) return;
 
-            ByteBuffer buf = codec.getInputBuffer(idx);
-            if (buf == null) return;
+            ByteBuffer inputBuf = codec.getInputBuffer(inputIdx);
+            if (inputBuf == null) return;
 
-            buf.clear();
-            buf.put(data);
-            codec.queueInputBuffer(idx, 0, data.length, timestampUs, 0);
+            inputBuf.clear();
+            int len = Math.min(data.length, inputBuf.capacity());
+            inputBuf.put(data, 0, len);
+            codec.queueInputBuffer(inputIdx, 0, len, 0, 0);
+
+            // Drain all available output frames to Surface
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            int outputIdx;
+            while ((outputIdx = codec.dequeueOutputBuffer(info, 0)) >= 0) {
+                codec.releaseOutputBuffer(outputIdx, true);
+            }
+        } catch (IllegalStateException e) {
+            Log.w(TAG, "codec error", e);
+            release();
         } catch (Exception e) {
             Log.w(TAG, "feedData error", e);
         }
     }
 
     public void release() {
-        running = false;
-        configured = false;  // stop feedData from using codec
-        running = false;
-        if (outputThread != null) {
-            try { outputThread.join(1000); }
-            catch (InterruptedException ignored) {}
-            outputThread = null;
-        }
+        configured = false;
         if (codec != null) {
             try {
                 codec.stop();
                 codec.release();
-            } catch (Exception e) {
-                // expected if codec already stopped
-            }
+            } catch (Exception ignored) {}
             codec = null;
         }
         Log.i(TAG, "decoder released");
-    }
-
-    private void configureCodec(byte[] csd) {
-        release();
-
-        try {
-            MediaFormat format = MediaFormat.createVideoFormat(
-                    MIME_H264, videoWidth, videoHeight);
-            format.setByteBuffer("csd-0", ByteBuffer.wrap(csd));
-            format.setInteger("low-latency", 1);
-
-            codec = MediaCodec.createDecoderByType(MIME_H264);
-            codec.configure(format, surface, null, 0);
-            codec.start();
-            configured = true;
-
-            // Start output drain thread
-            running = true;
-            outputThread = new Thread(this::outputLoop, "VideoDecoder-output");
-            outputThread.start();
-
-            Log.i(TAG, "decoder configured: " + videoWidth + "x" + videoHeight);
-        } catch (Exception e) {
-            Log.e(TAG, "failed to configure decoder", e);
-            codec = null;
-            configured = false;
-        }
-    }
-
-    private void outputLoop() {
-        Log.d(TAG, "output thread started");
-        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-
-        while (running && codec != null) {
-            try {
-                int idx = codec.dequeueOutputBuffer(info, OUTPUT_TIMEOUT_US);
-                if (idx >= 0) {
-                    codec.releaseOutputBuffer(idx, System.nanoTime());
-                } else if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    Log.i(TAG, "output format: " + codec.getOutputFormat());
-                }
-            } catch (Exception e) {
-                if (running) {
-                    Log.w(TAG, "output drain error", e);
-                }
-                break;
-            }
-        }
-        Log.d(TAG, "output thread exited");
     }
 }

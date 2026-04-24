@@ -8,7 +8,6 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.hardware.usb.UsbDevice;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -71,11 +70,12 @@ public class DeviceListActivity extends Activity
         adapter = new DeviceAdapter();
         listView.setAdapter(adapter);
         listView.setOnItemClickListener((parent, view, position, id) -> {
+            if (aaService == null) return;
             DeviceEntry entry = adapter.getEntry(position);
-            if (entry != null && aaService != null && entry.type == DeviceEntry.USB) {
-                Log.i(TAG, "USB device selected, connecting");
-                aaService.connectDevice();
-            }
+            if (entry == null || entry.sessionId <= 0) return;
+
+            Log.i(TAG, "activating session " + entry.sessionId);
+            aaService.activateSession(entry.sessionId);
         });
         root.addView(listView, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.MATCH_PARENT, 3));
@@ -156,22 +156,18 @@ public class DeviceListActivity extends Activity
 
     private void refreshDeviceList() {
         List<DeviceEntry> entries = new ArrayList<>();
-        if (aaService != null && !aaService.hasActiveSession()) {
-            UsbDevice usb = aaService.getAvailableDevice();
-            if (usb != null) {
-                String name = usb.getProductName() != null
-                        ? usb.getProductName() : "Unknown Device";
-                entries.add(new DeviceEntry(DeviceEntry.USB, name, ""));
-            }
-
-            String wirelessName = aaService.getWirelessDeviceName();
-            if (wirelessName != null) {
-                String status = aaService.isWirelessConnecting()
-                        ? "Connecting..." : "Ready";
-                entries.add(new DeviceEntry(DeviceEntry.WIRELESS,
-                        wirelessName, status));
-            }
+        if (aaService == null) {
+            adapter.setEntries(entries);
+            return;
         }
+
+        for (SessionManager.SessionEntry session : aaService.getSessionManager().getAll()) {
+            String name = session.deviceName != null
+                    ? session.deviceName : "Connecting...";
+            String status = session.transportLabel + " - " + session.state.name();
+            entries.add(new DeviceEntry(session.sessionId, name, status));
+        }
+
         adapter.setEntries(entries);
     }
 
@@ -278,15 +274,12 @@ public class DeviceListActivity extends Activity
     // ===== Device entry =====
 
     private static class DeviceEntry {
-        static final int USB = 0;
-        static final int WIRELESS = 1;
-
-        final int type;
+        final int sessionId;
         final String name;
         final String status;
 
-        DeviceEntry(int type, String name, String status) {
-            this.type = type;
+        DeviceEntry(int sessionId, String name, String status) {
+            this.sessionId = sessionId;
             this.name = name;
             this.status = status;
         }
@@ -324,7 +317,6 @@ public class DeviceListActivity extends Activity
             row.removeAllViews();
 
             DeviceEntry entry = entries.get(position);
-            String label = entry.type == DeviceEntry.USB ? "USB" : "Wireless";
 
             TextView nameView = new TextView(parent.getContext());
             nameView.setText(entry.name);
@@ -333,8 +325,7 @@ public class DeviceListActivity extends Activity
             nameView.setTypeface(Typeface.DEFAULT_BOLD);
             row.addView(nameView);
 
-            String sub = label;
-            if (!entry.status.isEmpty()) sub += "  -  " + entry.status;
+            String sub = entry.status;
             TextView subView = new TextView(parent.getContext());
             subView.setText(sub);
             subView.setTextSize(TEXT_SIZE_SUB);

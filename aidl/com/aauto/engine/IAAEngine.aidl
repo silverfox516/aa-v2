@@ -16,6 +16,13 @@ interface IAAEngine {
     /** Send touch event to phone. action: 0=DOWN, 1=UP, 2=MOVE */
     oneway void sendTouchEvent(int sessionId, int x, int y, int action);
 
+    /** Set video focus. true=PROJECTED (phone sends video), false=NATIVE (phone stops). */
+    void setVideoFocus(int sessionId, boolean projected);
+
+    /** Attach/detach all sinks (video + audio) for session switching. */
+    void attachAllSinks(int sessionId);
+    void detachAllSinks(int sessionId);
+
     void stopSession(int sessionId);
     void stopAll();
     void registerCallback(IAAEngineCallback callback);

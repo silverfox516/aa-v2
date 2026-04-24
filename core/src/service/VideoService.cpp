@@ -15,6 +15,7 @@
 #include <aap_protobuf/service/media/sink/message/VideoFrameRateType.pb.h>
 #include <aap_protobuf/service/media/sink/message/VideoConfiguration.pb.h>
 #include <aap_protobuf/service/media/video/message/VideoFocusNotification.pb.h>
+#include <aap_protobuf/service/media/video/message/VideoFocusRequestNotification.pb.h>
 #include <aap_protobuf/service/media/video/message/VideoFocusMode.pb.h>
 #include <aap_protobuf/service/media/source/message/Ack.pb.h>
 
@@ -53,8 +54,19 @@ VideoService::VideoService(SendMessageFn send_fn,
                          AA_LOG_I("media stop received");
                      });
     register_handler(static_cast<uint16_t>(MT::VideoFocusRequest),
-                     [](auto*, auto) {
-                         AA_LOG_D("video focus request received");
+                     [this](const uint8_t* data, std::size_t size) {
+                         namespace vfm = aap_protobuf::service::media::video::message;
+                         vfm::VideoFocusRequestNotification req;
+                         if (!req.ParseFromArray(data, static_cast<int>(size))) return;
+                         AA_LOG_I("VideoFocusRequest: mode=%d reason=%d",
+                                  req.mode(), req.reason());
+                         if (req.mode() == vfm::VIDEO_FOCUS_NATIVE) {
+                             set_video_focus(false);
+                             if (focus_callback_) focus_callback_(false);
+                         } else if (req.mode() == vfm::VIDEO_FOCUS_PROJECTED) {
+                             set_video_focus(true);
+                             if (focus_callback_) focus_callback_(true);
+                         }
                      });
     register_handler(static_cast<uint16_t>(MT::Ack),
                      [](auto*, auto) {});
@@ -63,7 +75,7 @@ VideoService::VideoService(SendMessageFn send_fn,
 void VideoService::on_channel_open(uint8_t channel_id) {
     ServiceBase::on_channel_open(channel_id);
     AA_LOG_I("video channel opened: %u", channel_id);
-    send_video_focus(true);
+    // VideoFocus NOT sent here — app controls when to project via set_video_focus()
 }
 
 void VideoService::set_native_window(void* window) {
@@ -130,7 +142,13 @@ void VideoService::on_codec_config(const uint8_t* data, std::size_t size) {
 }
 
 void VideoService::on_data(const uint8_t* data, std::size_t size) {
-    if (!started_) return;
+    if (!started_ || !sinks_active_) {
+        if (!sinks_active_) {
+            AA_LOG_W("video data dropped: sinks not active (%zu bytes)", size);
+        }
+        send_ack();
+        return;
+    }
 
     int64_t timestamp_us = 0;
     const uint8_t* frame_data = data;
@@ -155,6 +173,22 @@ void VideoService::send_ack() {
     ack.set_session_id(session_id_);
     ack.set_ack(1);
     send(static_cast<uint16_t>(MediaMessageType::Ack), serialize(ack));
+}
+
+void VideoService::set_video_focus(bool projected) {
+    if (projected) attach_sinks();
+    else           detach_sinks();
+    send_video_focus(projected);
+}
+
+void VideoService::attach_sinks() {
+    sinks_active_ = true;
+    AA_LOG_I("video sinks attached");
+}
+
+void VideoService::detach_sinks() {
+    sinks_active_ = false;
+    AA_LOG_I("video sinks detached");
 }
 
 void VideoService::send_video_focus(bool gain) {

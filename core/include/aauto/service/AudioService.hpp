@@ -26,6 +26,8 @@ public:
     ServiceType type() const override { return ServiceType::MediaSink; }
     void on_channel_open(uint8_t channel_id) override;
     void on_channel_close() override;
+    void attach_sinks() override;
+    void detach_sinks() override;
     void fill_config(aap_protobuf::service::ServiceConfiguration* config) override;
 
 private:
@@ -39,6 +41,7 @@ private:
 
     AudioServiceConfig                             audio_config_;
     std::vector<std::shared_ptr<sink::IAudioSink>> sinks_;
+    bool sinks_active_ = false;
     int32_t  session_id_    = 0;
     bool     started_       = false;
     sink::AudioConfig current_config_{};

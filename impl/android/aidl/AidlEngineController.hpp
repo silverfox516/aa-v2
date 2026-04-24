@@ -36,6 +36,11 @@ public:
     android::binder::Status sendTouchEvent(
         int32_t sessionId, int32_t x, int32_t y, int32_t action) override;
 
+    android::binder::Status setVideoFocus(
+        int32_t sessionId, bool projected) override;
+    android::binder::Status attachAllSinks(int32_t sessionId) override;
+    android::binder::Status detachAllSinks(int32_t sessionId) override;
+
     android::binder::Status stopSession(int32_t sessionId) override;
     android::binder::Status stopAll() override;
 
@@ -57,6 +62,7 @@ public:
     void on_audio_data(uint32_t session_id, uint32_t stream_type,
                        const uint8_t* data, std::size_t size,
                        int64_t timestamp_us) override;
+    void on_video_focus_changed(uint32_t session_id, bool projected) override;
 
 private:
     engine::IEngineController* engine_;

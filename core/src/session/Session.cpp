@@ -98,6 +98,25 @@ void Session::set_video_surface(void* native_window) {
     }
 }
 
+void Session::set_video_focus(bool projected) {
+    // Only video service handles focus — audio sinks unaffected
+    for (auto& [ch, svc] : services_) {
+        svc->set_video_focus(projected);
+    }
+}
+
+void Session::attach_all_sinks() {
+    for (auto& [ch, svc] : services_) {
+        svc->attach_sinks();
+    }
+}
+
+void Session::detach_all_sinks() {
+    for (auto& [ch, svc] : services_) {
+        svc->detach_sinks();
+    }
+}
+
 void Session::send_touch_event(int32_t x, int32_t y, int32_t action) {
     for (auto& [ch, svc] : services_) {
         svc->send_touch(x, y, action);

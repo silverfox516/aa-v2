@@ -358,3 +358,54 @@ video decoding or SharedMemory for frame transfer.
 requires a valid country code. `iw reg set`, `settings put`, `setprop
 persist.vendor.wifi.country` all failed at runtime. Requires platform
 build configuration (`ro.boot.wificountrycode=KR` or board overlay).
+
+---
+
+## 19. Video not displayed after focus transition (IDR frame drop)
+
+**Symptom**: Video works on first connection. After going back to device
+list and re-activating, video sometimes does not appear. TCC803x HW
+decoder logs `key frame search (I-Slice)` 201 times then dies with
+`OMX_ErrorHardware`.
+
+**Root causes** (multiple issues found):
+1. **Garbage timestamps**: Phone timestamps after focus transition were
+   invalid (e.g., `2798039084948324352`). TCC803x HW decoder crashed on
+   these values.
+2. **IDR frame drop**: `configureCodec` called `release()` which blocks
+   on `outputThread.join()`. During this block, the IDR frame arrived on
+   a Binder thread and was dropped (`configured=false`). Only P-frames
+   arrived after the decoder was ready — no keyframe = no output.
+3. **Output thread complexity**: Separate output drain thread required
+   synchronization (codecLock, configured flag) and created race
+   conditions during codec reconfiguration.
+
+**Fix**: Adopted reference implementation's single-threaded model:
+- No separate output thread. `feedData()` queues input AND drains output
+  in one call (matching reference `pushData` pattern).
+- CSD (SPS/PPS) not set in MediaFormat — arrives in stream, decoded
+  like any other NAL unit.
+- Timestamp always 0 (no phone timestamp, no monotonic counter).
+- `releaseOutputBuffer(idx, true)` (matching reference).
+- `open()` configures codec once; subsequent `feedData` calls just
+  queue data. No reconfiguration on same session.
+
+**Key insight**: The dual-threaded approach added complexity (thread sync,
+join blocking, codec caching) without real benefit. HW decoder is fast
+enough to decode within one `feedData` call cycle.
+
+---
+
+## 20. VideoFocus must follow Surface lifecycle
+
+**Symptom**: Phone sends codec config before Surface is ready. Codec
+config cached but first IDR frame sometimes dropped.
+
+**Root cause**: `VideoFocus(PROJECTED)` was sent in `activateSession()`
+before `AaDisplayActivity` created the Surface. Phone started sending
+before decoder was ready.
+
+**Fix**: VideoFocus driven by Surface lifecycle:
+- `surfaceCreated` → `onSurfaceReady()` → `VideoFocus(PROJECTED)`
+- `surfaceDestroyed` → `onSurfaceDestroyed()` → `VideoFocus(NATIVE)`
+- `activateSession()` no longer sends VideoFocus directly

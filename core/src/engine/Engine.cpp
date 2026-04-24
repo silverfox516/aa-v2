@@ -89,6 +89,34 @@ void Engine::send_touch_event(uint32_t session_id,
     });
 }
 
+void Engine::set_video_focus(uint32_t session_id, bool projected) {
+    AA_LOG_I("set_video_focus: session=%u projected=%d", session_id, projected);
+    asio::post(io_context_, [this, session_id, projected] {
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            it->second->set_video_focus(projected);
+        }
+    });
+}
+
+void Engine::attach_all_sinks(uint32_t session_id) {
+    asio::post(io_context_, [this, session_id] {
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            it->second->attach_all_sinks();
+        }
+    });
+}
+
+void Engine::detach_all_sinks(uint32_t session_id) {
+    asio::post(io_context_, [this, session_id] {
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            it->second->detach_all_sinks();
+        }
+    });
+}
+
 // ===== Lifecycle =====
 
 void Engine::run(unsigned int thread_count) {
@@ -202,6 +230,14 @@ std::shared_ptr<service::ControlService> Engine::create_control_service(
                 s->stop();
             }
         });
+    control_svc->set_phone_identified_callback(
+        [this, sid](const std::string& device_name) {
+            AA_LOG_I("phone identified: session=%u name=%s",
+                     sid, device_name.c_str());
+            if (callback_) {
+                callback_->on_phone_identified(sid, device_name, "");
+            }
+        });
     control_svc->on_channel_open(kControlChannelId);  // implicit channel — start heartbeat
     return control_svc;
 }
@@ -243,6 +279,7 @@ void Engine::do_start_session(const std::string& descriptor, uint32_t sid) {
     auto send_fn = make_send_fn(session);
 
     // Create peer services (ch 1~6: video, audio, input, sensor, etc.)
+    service_factory_->set_session_id(sid);
     auto peer_services = service_factory_->create_services(send_fn);
 
     // Assign channel IDs to peer services before creating ControlService
