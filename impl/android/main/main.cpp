@@ -6,6 +6,10 @@
 #include "aauto/service/InputService.hpp"
 #include "aauto/service/SensorService.hpp"
 #include "aauto/service/MicrophoneService.hpp"
+#include "aauto/service/NavigationStatusService.hpp"
+#include "aauto/service/PhoneStatusService.hpp"
+#include "aauto/service/MediaPlaybackService.hpp"
+#include "aauto/service/GenericNotificationService.hpp"
 #include "aauto/sink/CallbackVideoSink.hpp"
 #include "aauto/sink/CallbackAudioSink.hpp"
 #include "aauto/utils/Logger.hpp"
@@ -171,6 +175,18 @@ public:
 
         // Channel 7: Microphone source (stub)
         services[7] = std::make_shared<service::MicrophoneService>(send_fn);
+
+        // Channel 8: Navigation status
+        services[8] = std::make_shared<service::NavigationStatusService>(send_fn);
+
+        // Channel 9: Phone status
+        services[9] = std::make_shared<service::PhoneStatusService>(send_fn);
+
+        // Channel 10: Media playback status
+        services[10] = std::make_shared<service::MediaPlaybackService>(send_fn);
+
+        // Channel 11: Generic notifications
+        services[11] = std::make_shared<service::GenericNotificationService>(send_fn);
 
         return services;
     }
