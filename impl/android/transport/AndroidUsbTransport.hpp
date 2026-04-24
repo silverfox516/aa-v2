@@ -59,7 +59,7 @@ private:
     transport::WriteHandler pending_write_handler_;
     bool write_requested_ = false;
 
-    static constexpr int kBulkTimeoutMs = 500;
+    static constexpr int kBulkTimeoutMs = 2000;
 };
 
 } // namespace aauto::impl

@@ -126,6 +126,16 @@ public class AaService extends Service
             Log.i(TAG, "phone identified: session=" + sessionId
                     + " name=" + deviceName);
             handler.post(() -> {
+                // Close existing session from the same phone (transport switch)
+                for (SessionManager.SessionEntry e : sessionManager.getAll()) {
+                    if (e.sessionId != sessionId
+                            && deviceName.equals(e.deviceName)) {
+                        Log.i(TAG, "same phone on session " + e.sessionId
+                                + ", closing old session");
+                        stopAndRemoveSession(e.sessionId);
+                        break;
+                    }
+                }
                 sessionManager.onPhoneIdentified(sessionId, deviceName);
                 notifyDeviceStateChanged();
             });
@@ -251,6 +261,10 @@ public class AaService extends Service
 
     @Override
     public void onDeviceReady(int fd, int epIn, int epOut) {
+        startUsbSession(fd, epIn, epOut);
+    }
+
+    private void startUsbSession(int fd, int epIn, int epOut) {
         if (engineProxy == null) {
             Log.e(TAG, "engine not connected, cannot start USB session");
             return;
@@ -268,6 +282,7 @@ public class AaService extends Service
         }
         notifyDeviceStateChanged();
     }
+
 
     @Override
     public void onDeviceRemoved() {

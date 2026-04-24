@@ -409,3 +409,31 @@ before decoder was ready.
 - `surfaceCreated` → `onSurfaceReady()` → `VideoFocus(PROJECTED)`
 - `surfaceDestroyed` → `onSurfaceDestroyed()` → `VideoFocus(NATIVE)`
 - `activateSession()` no longer sends VideoFocus directly
+
+---
+
+## 21. Same phone USB+wireless: both connections drop
+
+**Symptom**: Phone wirelessly connected. USB cable plugged in → AOA switch
+→ phone drops wireless TCP → USB session starts → USB write times out
+(phone transitioning) → both sessions dead.
+
+Reverse: phone wired. Wireless connects → phone drops USB → slow to
+detect disconnect (blocked on USB write timeout).
+
+**Root cause**: Same phone can only maintain one AA connection. New
+transport → phone drops old transport. Two issues:
+1. Wireless→USB: USB write timeout (500ms) too short for phone transition
+2. USB→wireless: USB disconnect detection slow (blocked on timeout)
+
+**Fix**: Two complementary changes:
+1. USB bulk timeout increased to 2000ms — gives phone time to complete
+   wireless→USB transition. VERSION_REQUEST write waits up to 2s.
+2. Same-phone detection in `onPhoneIdentified`: when ServiceDiscovery
+   identifies a phone that already has an active session on a different
+   transport, the old session is closed immediately (no timeout wait).
+
+```
+Wireless→USB: AOA switch → wireless drops → USB 2s timeout → phone ready → success
+USB→wireless: wireless handshake → onPhoneIdentified → same phone → USB closed immediately
+```
