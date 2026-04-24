@@ -517,3 +517,38 @@ Test seam이 디자인의 부산물이 아니라 핵심.
   - A.4 engine 책임: "미디어 디코딩/출력" 삭제 → "미디어 스트림 추출"
   - A.4 app 책임: "Surface/UI 제공" → "미디어 디코딩 + Surface/UI"
   - IPC 경계에 미디어 콜백 추가 (onVideoData, onAudioData)
+
+### F.13 SessionManager 기반 다중 세션 관리 (2026-04-24)
+
+- **대안**: SessionLifecycleController (단일 세션) / SessionManager (다중 세션)
+- **선택**: SessionManager — session_id 기반 Map으로 다중 세션 독립 관리
+- **근거**:
+  - 단일 세션 모델(SessionLifecycleController)은 USB/무선 동시 연결 시 상태 혼재
+  - USB detach 이벤트가 무선 세션에 영향을 주는 버그 발생
+  - transport 타입으로 구분하는 것은 임시방편 — session_id로 추적이 근본
+- **SessionLifecycleController 삭제**: SessionManager로 완전 대체
+
+### F.14 VideoFocus는 Surface 라이프사이클이 드라이버 (2026-04-24)
+
+- **대안**: activateSession에서 즉시 PROJECTED / Surface 준비 후 PROJECTED
+- **선택**: surfaceCreated → PROJECTED, surfaceDestroyed → NATIVE
+- **근거**:
+  - PROJECTED 전에 Surface가 없으면 codec config/IDR 드롭 → 비디오 안 나옴
+  - Surface 라이프사이클이 실제 렌더링 가능 시점을 정확히 반영
+
+### F.15 VideoDecoder 단일 스레드 모델 (2026-04-24)
+
+- **대안**: 별도 output thread (이중 스레드) / pushData 내 동기 처리 (단일 스레드)
+- **선택**: 단일 스레드 (레퍼런스 패턴)
+- **근거**:
+  - 이중 스레드는 join 블로킹 → IDR 드롭 → 비디오 안 나옴
+  - HW 디코더가 충분히 빨라서 feedData 한 번에 input+output 처리 가능
+  - 스레드 동기화 복잡도 제거 (codecLock, configured 플래그 불필요)
+
+### F.16 같은 폰 transport 전환 처리 (2026-04-24)
+
+- **선택**: USB timeout 2초 + onPhoneIdentified 같은 폰 감지 → 기존 세션 종료
+- **근거**:
+  - 같은 폰은 한 번에 하나의 AA 연결만 유지 (폰 동작)
+  - 무선→유선: AOA 전환 시 폰이 무선 끊음 → USB timeout으로 대기
+  - 유선→무선: onPhoneIdentified에서 같은 폰 감지 → USB 즉시 종료 (timeout 대기 없음)
