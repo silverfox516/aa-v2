@@ -62,4 +62,8 @@ void set_session_tag(const std::string& tag) {
     g_session_tag = tag;
 }
 
+std::string get_session_tag() {
+    return g_session_tag;
+}
+
 } // namespace aauto

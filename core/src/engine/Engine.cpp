@@ -231,7 +231,15 @@ std::shared_ptr<service::ControlService> Engine::create_control_service(
             }
         });
     control_svc->set_phone_identified_callback(
-        [this, sid](const std::string& device_name) {
+        [this, sid, weak = std::weak_ptr<session::Session>(session)]
+        (const std::string& device_name) {
+            // Update session log tag with phone name
+            auto pos = device_name.find(' ');
+            std::string short_name = (pos != std::string::npos)
+                ? device_name.substr(pos + 1) : device_name;
+            if (auto s = weak.lock()) {
+                s->update_log_tag(short_name);
+            }
             AA_LOG_I("phone identified: session=%u name=%s",
                      sid, device_name.c_str());
             if (callback_) {
@@ -268,6 +276,7 @@ void Engine::report_start_session_failure(uint32_t sid, const std::string& detai
 }
 
 void Engine::do_start_session(const std::string& descriptor, uint32_t sid) {
+    set_session_tag("s" + std::to_string(sid));
     auto transport = transport_factory_->create(
         io_context_.get_executor(), descriptor);
     if (!transport) {

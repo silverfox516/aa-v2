@@ -69,14 +69,6 @@ ControlService::ControlService(
                         AA_LOG_I("  instance_id: %s", pi.instance_id().c_str());
                     }
                 }
-                // Append phone name to session tag for all subsequent logs.
-                // Strip manufacturer prefix (e.g., "samsung SM-N981N" -> "SM-N981N")
-                auto pos = phone_name.find(' ');
-                std::string short_name = (pos != std::string::npos)
-                    ? phone_name.substr(pos + 1) : phone_name;
-                session_tag_ += ":" + short_name;
-                aauto::set_session_tag(session_tag_);
-
                 if (phone_identified_cb_) {
                     phone_identified_cb_(phone_name);
                 }

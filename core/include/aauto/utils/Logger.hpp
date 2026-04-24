@@ -17,6 +17,9 @@ void log_impl(LogLevel level, const char* tag, const char* fmt, ...);
 /// Shown in every log line from this thread. Pass empty to clear.
 void set_session_tag(const std::string& tag);
 
+/// Get the current thread's session tag.
+std::string get_session_tag();
+
 } // namespace aauto
 
 // Usage: define LOG_TAG before including this header.

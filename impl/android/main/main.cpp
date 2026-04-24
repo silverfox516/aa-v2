@@ -38,7 +38,15 @@ void android_log_function(LogLevel level, const char* tag,
         case LogLevel::Error: prio = ANDROID_LOG_ERROR; break;
         default:              prio = ANDROID_LOG_INFO;   break;
     }
-    __android_log_vprint(prio, tag, fmt, args);
+    // Prepend session tag to message (e.g., "s1:SM-N981N VERSION_REQUEST...")
+    std::string session_tag = aauto::get_session_tag();
+    if (session_tag.empty()) {
+        __android_log_vprint(prio, tag, fmt, args);
+    } else {
+        char buf[4096];
+        vsnprintf(buf, sizeof(buf), fmt, args);
+        __android_log_print(prio, tag, "%s %s", session_tag.c_str(), buf);
+    }
 }
 
 } // anonymous namespace

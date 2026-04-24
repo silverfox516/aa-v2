@@ -68,6 +68,9 @@ public:
 
     /// Forward touch event to input service(s).
     void send_touch_event(int32_t x, int32_t y, int32_t action);
+
+    /// Update session log tag (e.g., after phone is identified).
+    void update_log_tag(const std::string& suffix);
     void set_video_focus(bool projected);
     void attach_all_sinks();
     void detach_all_sinks();
@@ -126,6 +129,10 @@ private:
     std::map<uint8_t, std::shared_ptr<service::IService>> services_;
 
     asio::steady_timer                        state_timer_;
+    std::string                               session_tag_;
+
+    /// Set this session's tag as the thread-local log tag.
+    void activate_log_tag();
 };
 
 } // namespace aauto::session

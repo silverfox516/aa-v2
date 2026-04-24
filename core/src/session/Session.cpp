@@ -66,11 +66,21 @@ SessionState Session::state() const {
 // ===== Public API =====
 
 void Session::start() {
+    session_tag_ = "s" + std::to_string(config_.session_id);
     auto self = shared_from_this();
     asio::post(strand_, [self] {
-        set_session_tag("s" + std::to_string(self->config_.session_id));
+        self->activate_log_tag();
         self->begin_version_exchange();
     });
+}
+
+void Session::activate_log_tag() {
+    set_session_tag(session_tag_);
+}
+
+void Session::update_log_tag(const std::string& suffix) {
+    session_tag_ = "s" + std::to_string(config_.session_id) + ":" + suffix;
+    activate_log_tag();
 }
 
 void Session::stop() {
@@ -167,6 +177,7 @@ void Session::do_write_next() {
 
 void Session::on_write_complete(const std::error_code& ec,
                                 std::size_t /*bytes*/) {
+    activate_log_tag();
     if (ec) {
         if (ec == asio::error::operation_aborted) return;
         AA_LOG_E("write error: %s", ec.message().c_str());
@@ -192,6 +203,7 @@ void Session::start_read() {
 
 void Session::on_read_complete(const std::error_code& ec,
                                std::size_t bytes) {
+    activate_log_tag();
     if (ec) {
         if (ec == asio::error::operation_aborted) return;
         AA_LOG_E("read error: %s", ec.message().c_str());
