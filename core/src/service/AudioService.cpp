@@ -29,6 +29,16 @@ static std::vector<uint8_t> serialize(const T& msg) {
 
 static constexpr std::size_t kAudioTimestampBytes = 8;
 
+static const char* stream_name(sink::AudioStreamType st) {
+    switch (st) {
+        case sink::AudioStreamType::Media:    return "audio.media";
+        case sink::AudioStreamType::Guidance: return "audio.guidance";
+        case sink::AudioStreamType::System:   return "audio.system";
+        case sink::AudioStreamType::Call:     return "audio.call";
+    }
+    return "audio";
+}
+
 static pb_audio::AudioStreamType
 to_proto_stream_type(sink::AudioStreamType st) {
     switch (st) {
@@ -64,9 +74,8 @@ AudioService::AudioService(SendMessageFn send_fn,
 
 void AudioService::on_channel_open(uint8_t channel_id) {
     ServiceBase::on_channel_open(channel_id);
-    AA_LOG_I("audio channel opened: %u, stream_type=%u",
-             channel_id,
-             static_cast<uint32_t>(audio_config_.stream_type));
+    AA_LOG_I("%-18s %-24s ch=%u",
+             stream_name(audio_config_.stream_type), "CHANNEL_OPEN", channel_id);
 }
 
 void AudioService::on_channel_close() {
@@ -77,7 +86,7 @@ void AudioService::on_channel_close() {
         started_ = false;
     }
     ServiceBase::on_channel_close();
-    AA_LOG_I("audio channel closed");
+    AA_LOG_I("%-18s %-24s", stream_name(audio_config_.stream_type), "CHANNEL_CLOSE");
 }
 
 void AudioService::fill_config(
@@ -96,7 +105,9 @@ void AudioService::fill_config(
 void AudioService::on_setup(const uint8_t* data, std::size_t size) {
     pb_media::shared::message::Setup setup;
     if (setup.ParseFromArray(data, static_cast<int>(size))) {
-        AA_LOG_I("audio setup: codec=%d", setup.type());
+        AA_LOG_I("%-18s %-24s codec=%s",
+                 stream_name(audio_config_.stream_type), "MEDIA_SETUP",
+                 setup.type() == 1 ? "PCM" : "AAC");
     }
 
     pb_media::shared::message::Config config;
@@ -105,7 +116,6 @@ void AudioService::on_setup(const uint8_t* data, std::size_t size) {
     config.add_configuration_indices(0);
 
     send(static_cast<uint16_t>(MediaMessageType::Config), serialize(config));
-    AA_LOG_I("sent audio config (READY, max_unacked=10)");
 }
 
 void AudioService::on_config(const uint8_t* data, std::size_t size) {
@@ -119,9 +129,8 @@ void AudioService::on_start(const uint8_t* data, std::size_t size) {
     pb_media::shared::message::Start start;
     if (start.ParseFromArray(data, static_cast<int>(size))) {
         session_id_ = start.session_id();
-        AA_LOG_I("audio start: session_id=%d, stream_type=%u",
-                 session_id_,
-                 static_cast<uint32_t>(audio_config_.stream_type));
+        AA_LOG_I("%-18s %-24s session=%d",
+                 stream_name(audio_config_.stream_type), "MEDIA_START", session_id_);
     }
 
     started_ = true;
@@ -140,14 +149,12 @@ void AudioService::on_codec_config(const uint8_t* data, std::size_t size) {
 
 void AudioService::attach_sinks() {
     sinks_active_ = true;
-    AA_LOG_I("audio sinks attached (stream %d)",
-             static_cast<int>(audio_config_.stream_type));
+    AA_LOG_I("%-18s sinks attached", stream_name(audio_config_.stream_type));
 }
 
 void AudioService::detach_sinks() {
     sinks_active_ = false;
-    AA_LOG_I("audio sinks detached (stream %d)",
-             static_cast<int>(audio_config_.stream_type));
+    AA_LOG_I("%-18s sinks detached", stream_name(audio_config_.stream_type));
 }
 
 void AudioService::on_data(const uint8_t* data, std::size_t size) {
@@ -179,7 +186,7 @@ void AudioService::on_stop(const uint8_t* /*data*/, std::size_t /*size*/) {
         }
         started_ = false;
     }
-    AA_LOG_I("audio stop");
+    AA_LOG_I("%-18s %-24s", stream_name(audio_config_.stream_type), "MEDIA_STOP");
 }
 
 void AudioService::send_ack() {

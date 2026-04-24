@@ -33,7 +33,17 @@ SensorService::SensorService(SendMessageFn send_fn)
         [this](const uint8_t* data, std::size_t size) {
             pb_sensor::SensorRequest req;
             if (req.ParseFromArray(data, static_cast<int>(size))) {
-                AA_LOG_I("sensor start request: type=%d", req.type());
+                const char* sensor_name = "unknown";
+                switch (req.type()) {
+                    case 1: sensor_name = "COMPASS"; break;
+                    case 2: sensor_name = "GYROSCOPE"; break;
+                    case 3: sensor_name = "ACCELEROMETER"; break;
+                    case 8: sensor_name = "GPS"; break;
+                    case 10: sensor_name = "NIGHT_MODE"; break;
+                    case 13: sensor_name = "DRIVING_STATUS"; break;
+                    default: break;
+                }
+                AA_LOG_I("%-18s %-24s type=%s", "sensor", "SENSOR_START", sensor_name);
 
                 // Send SensorStartResponse(SUCCESS)
                 pb_sensor::SensorStartResponseMessage resp;
@@ -50,7 +60,7 @@ SensorService::SensorService(SendMessageFn send_fn)
 
 void SensorService::on_channel_open(uint8_t channel_id) {
     ServiceBase::on_channel_open(channel_id);
-    AA_LOG_I("sensor channel opened: %u", channel_id);
+    AA_LOG_I("%-18s %-24s ch=%u", "sensor", "CHANNEL_OPEN", channel_id);
     send_driving_status();
 }
 
@@ -60,7 +70,6 @@ void SensorService::send_driving_status() {
     ds->set_status(0);  // DRIVING_STATUS_UNRESTRICTED
 
     send(static_cast<uint16_t>(SensorMessageType::Batch), serialize(batch));
-    AA_LOG_I("sent DrivingStatus(UNRESTRICTED)");
 }
 
 void SensorService::fill_config(

@@ -32,7 +32,7 @@ InputService::InputService(SendMessageFn send_fn, InputServiceConfig config)
 
     register_handler(static_cast<uint16_t>(InputMessageType::KeyBindingRequest),
         [this](const uint8_t*, std::size_t) {
-            AA_LOG_I("KeyBindingRequest received");
+            AA_LOG_I("%-18s %-24s -> SUCCESS", "input", "KEY_BINDING_REQ");
             pb_keybind::KeyBindingResponse resp;
             resp.set_status(aap_protobuf::shared::STATUS_SUCCESS);
             send(static_cast<uint16_t>(InputMessageType::KeyBindingResponse),

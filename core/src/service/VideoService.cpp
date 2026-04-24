@@ -58,8 +58,27 @@ VideoService::VideoService(SendMessageFn send_fn,
                          namespace vfm = aap_protobuf::service::media::video::message;
                          vfm::VideoFocusRequestNotification req;
                          if (!req.ParseFromArray(data, static_cast<int>(size))) return;
-                         AA_LOG_I("VideoFocusRequest: mode=%d reason=%d",
-                                  req.mode(), req.reason());
+                         auto mode_name = [](int m) -> const char* {
+                             switch (m) {
+                                 case 1: return "PROJECTED";
+                                 case 2: return "NATIVE";
+                                 case 3: return "NATIVE_TRANSIENT";
+                                 case 4: return "PROJECTED_NO_INPUT";
+                                 default: return "UNKNOWN";
+                             }
+                         };
+                         auto reason_name = [](int r) -> const char* {
+                             switch (r) {
+                                 case 0: return "UNKNOWN";
+                                 case 1: return "PHONE_SCREEN_OFF";
+                                 case 2: return "LAUNCH_NATIVE";
+                                 default: return "UNKNOWN";
+                             }
+                         };
+                         AA_LOG_I("%-18s %-24s mode=%s reason=%s",
+                                  "video", "FOCUS_REQUEST",
+                                  mode_name(req.mode()),
+                                  reason_name(req.reason()));
                          if (req.mode() == vfm::VIDEO_FOCUS_NATIVE) {
                              set_video_focus(false);
                              if (focus_callback_) focus_callback_(false);
@@ -74,15 +93,14 @@ VideoService::VideoService(SendMessageFn send_fn,
 
 void VideoService::on_channel_open(uint8_t channel_id) {
     ServiceBase::on_channel_open(channel_id);
-    AA_LOG_I("video channel opened: %u", channel_id);
-    // VideoFocus NOT sent here — app controls when to project via set_video_focus()
+    AA_LOG_I("%-18s %-24s ch=%u", "video", "CHANNEL_OPEN", channel_id);
 }
 
 void VideoService::set_native_window(void* window) {
     for (auto& sink : sinks_) {
         sink->set_native_window(window);
     }
-    AA_LOG_I("video surface %s", window ? "attached" : "detached");
+    AA_LOG_I("%-18s %-24s", "video", window ? "SURFACE_ATTACHED" : "SURFACE_DETACHED");
 }
 
 void VideoService::on_channel_close() {
@@ -93,31 +111,38 @@ void VideoService::on_channel_close() {
         started_ = false;
     }
     ServiceBase::on_channel_close();
-    AA_LOG_I("video channel closed");
+    AA_LOG_I("%-18s %-24s", "video", "CHANNEL_CLOSE");
 }
 
 void VideoService::on_setup(const uint8_t* data, std::size_t size) {
     pb_media::shared::message::Setup setup;
     if (setup.ParseFromArray(data, static_cast<int>(size))) {
-        AA_LOG_I("media setup: codec=%d", setup.type());
+        const char* codec_name = "unknown";
+        switch (setup.type()) {
+            case 1: codec_name = "PCM"; break;
+            case 2: codec_name = "AAC"; break;
+            case 3: codec_name = "H264_BP"; break;
+            case 4: codec_name = "H264_HP"; break;
+            case 5: codec_name = "VP8"; break;
+            default: break;
+        }
+        AA_LOG_I("%-18s %-24s codec=%s", "video", "MEDIA_SETUP", codec_name);
     }
 
-    // Respond with Config(READY)
     pb_media::shared::message::Config config;
     config.set_status(pb_media::shared::message::Config::STATUS_READY);
     config.set_max_unacked(10);
     config.add_configuration_indices(0);
 
     send(static_cast<uint16_t>(MediaMessageType::Config), serialize(config));
-    AA_LOG_I("sent media config (READY, max_unacked=10)");
 }
 
 void VideoService::on_start(const uint8_t* data, std::size_t size) {
     pb_media::shared::message::Start start;
     if (start.ParseFromArray(data, static_cast<int>(size))) {
         session_id_ = start.session_id();
-        AA_LOG_I("media start: session_id=%d config_index=%d",
-                 session_id_, start.configuration_index());
+        AA_LOG_I("%-18s %-24s session=%d config=%d",
+                 "video", "MEDIA_START", session_id_, start.configuration_index());
     }
 
     started_ = true;
@@ -128,7 +153,7 @@ void VideoService::on_start(const uint8_t* data, std::size_t size) {
 }
 
 void VideoService::on_codec_config(const uint8_t* data, std::size_t size) {
-    AA_LOG_I("codec config: %zu bytes", size);
+    AA_LOG_I("%-18s %-24s %zu bytes", "video", "CODEC_CONFIG", size);
 
     current_config_.codec_data.assign(data, data + size);
     current_config_.width = video_config_.width;
@@ -144,7 +169,7 @@ void VideoService::on_codec_config(const uint8_t* data, std::size_t size) {
 void VideoService::on_data(const uint8_t* data, std::size_t size) {
     if (!started_ || !sinks_active_) {
         if (!sinks_active_) {
-            AA_LOG_W("video data dropped: sinks not active (%zu bytes)", size);
+            AA_LOG_W("%-18s %-24s %zu bytes (sinks inactive)", "video", "DATA_DROPPED", size);
         }
         send_ack();
         return;
@@ -183,12 +208,12 @@ void VideoService::set_video_focus(bool projected) {
 
 void VideoService::attach_sinks() {
     sinks_active_ = true;
-    AA_LOG_I("video sinks attached");
+    AA_LOG_I("%-18s sinks attached", "video");
 }
 
 void VideoService::detach_sinks() {
     sinks_active_ = false;
-    AA_LOG_I("video sinks detached");
+    AA_LOG_I("%-18s sinks detached", "video");
 }
 
 void VideoService::send_video_focus(bool gain) {
@@ -200,8 +225,6 @@ void VideoService::send_video_focus(bool gain) {
 
     send(static_cast<uint16_t>(MediaMessageType::VideoFocusNotification),
          serialize(ntf));
-    AA_LOG_I("sent VideoFocusNotification(%s)",
-             gain ? "PROJECTED" : "NATIVE");
 }
 
 void VideoService::fill_config(

@@ -137,6 +137,15 @@ void Session::send_touch_event(int32_t x, int32_t y, int32_t action) {
 
 void Session::send_message(uint8_t channel_id, uint16_t message_type,
                            const std::vector<uint8_t>& payload) {
+    // Centralized TX logging — suppress noisy messages (ACK, PING, MEDIA_DATA)
+    if (message_type != static_cast<uint16_t>(MediaMessageType::Ack)
+            && message_type != static_cast<uint16_t>(ControlMessageType::PingRequest)
+            && message_type != static_cast<uint16_t>(ControlMessageType::PingResponse)
+            && message_type != static_cast<uint16_t>(MediaMessageType::Data)) {
+        AA_LOG_D("[AAP TX] %-18s %-24s %zu bytes",
+                 channel_name(channel_id), msg_type_name(message_type),
+                 payload.size());
+    }
     outbound_encoder_.send_message(channel_id, message_type, payload);
 }
 
@@ -249,7 +258,7 @@ void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
     if (msg_type != static_cast<uint16_t>(MediaMessageType::Data)
             && msg_type != static_cast<uint16_t>(ControlMessageType::PingRequest)
             && msg_type != static_cast<uint16_t>(ControlMessageType::PingResponse)) {
-        AA_LOG_D("rx [%s] %s (%zu bytes)",
+        AA_LOG_D("[AAP RX] %-18s %-24s %zu bytes",
                  channel_name(channel_id), msg_type_name(msg_type),
                  payload.size());
     }

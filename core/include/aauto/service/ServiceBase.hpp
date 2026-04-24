@@ -32,10 +32,6 @@ public:
         // CHANNEL_OPEN_REQUEST: respond first, then notify service
         if (message_type ==
                 static_cast<uint16_t>(ControlMessageType::ChannelOpenRequest)) {
-            ::aauto::log_impl(::aauto::LogLevel::Info,
-                              "AA.ServiceBase",
-                              "[%s] ChannelOpenRequest -> SUCCESS",
-                              channel_name(channel_id_));
             // Send ChannelOpenResponse BEFORE on_channel_open so the phone
             // sees the confirmation before any follow-up messages the service
             // might send (e.g., VideoFocusNotification, DrivingStatus).
@@ -52,7 +48,7 @@ public:
         } else {
             ::aauto::log_impl(::aauto::LogLevel::Warn,
                               "AA.ServiceBase",
-                              "[%s] unhandled %s (%zu bytes)",
+                              "%-18s %-24s unhandled (%zu bytes)",
                               channel_name(channel_id_),
                               msg_type_name(message_type),
                               payload_size);

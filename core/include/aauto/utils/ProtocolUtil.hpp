@@ -73,7 +73,11 @@ inline const char* channel_name(uint8_t ch) {
         case 4: return "audio.system";
         case 5: return "input";
         case 6: return "sensor";
-        case 7: return "microphone";
+        case 7:  return "microphone";
+        case 8:  return "nav.status";
+        case 9:  return "phone.status";
+        case 10: return "media.playback";
+        case 11: return "notification";
         default:
             static thread_local char buf[8];
             snprintf(buf, sizeof(buf), "ch%u", ch);

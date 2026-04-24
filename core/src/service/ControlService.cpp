@@ -61,7 +61,9 @@ ControlService::ControlService(
             if (req.ParseFromArray(data, static_cast<int>(size))) {
                 std::string phone_name = req.has_device_name()
                     ? req.device_name() : "unknown";
-                AA_LOG_I("phone connected: %s (%s)", phone_name.c_str(),
+                AA_LOG_I("%-18s %-24s name=%s label=%s",
+                         "control", "PHONE_CONNECTED",
+                         phone_name.c_str(),
                          req.has_label_text() ? req.label_text().c_str() : "");
                 if (req.has_phone_info()) {
                     const auto& pi = req.phone_info();
@@ -122,7 +124,8 @@ ControlService::ControlService(
                     default: return "UNKNOWN";
                 }
             };
-            AA_LOG_I("audio focus: %s -> %s",
+            AA_LOG_I("%-18s %-24s %s -> %s",
+                     "control", "AUDIO_FOCUS",
                      focus_req_name(request_type), focus_state_name(state));
             pb_ctrl::AudioFocusNotification notif;
             notif.set_focus_state(state);
@@ -134,7 +137,7 @@ ControlService::ControlService(
     // NAV_FOCUS_REQUEST
     register_handler(static_cast<uint16_t>(CT::NavFocusRequest),
         [this](const uint8_t*, std::size_t) {
-            AA_LOG_I("nav focus request, granting PROJECTED");
+            AA_LOG_I("%-18s %-24s PROJECTED", "control", "NAV_FOCUS");
             pb_ctrl::NavFocusNotification notif;
             notif.set_focus_type(pb_ctrl::NAV_FOCUS_PROJECTED);
             send(static_cast<uint16_t>(CT::NavFocusNotification),
@@ -161,7 +164,7 @@ ControlService::ControlService(
     // BYEBYE_REQUEST
     register_handler(static_cast<uint16_t>(CT::ByeByeRequest),
         [this](const uint8_t*, std::size_t) {
-            AA_LOG_I("received ByeByeRequest");
+            AA_LOG_I("%-18s %-24s", "control", "BYEBYE_REQUEST");
             send(static_cast<uint16_t>(CT::ByeByeResponse), {});
             trigger_session_close("ByeByeRequest");
         });
@@ -169,7 +172,7 @@ ControlService::ControlService(
     // BYEBYE_RESPONSE
     register_handler(static_cast<uint16_t>(CT::ByeByeResponse),
         [this](const uint8_t*, std::size_t) {
-            AA_LOG_I("received ByeByeResponse");
+            AA_LOG_I("%-18s %-24s", "control", "BYEBYE_RESPONSE");
             trigger_session_close("ByeByeResponse");
         });
 
@@ -190,7 +193,7 @@ ControlService::~ControlService() {
 
 void ControlService::on_channel_open(uint8_t channel_id) {
     ServiceBase::on_channel_open(channel_id);
-    AA_LOG_I("control channel opened, starting heartbeat");
+    AA_LOG_I("%-18s %-24s", "control", "CHANNEL_OPEN + HEARTBEAT");
     last_pong_ns_ = steady_now_ns();
     close_triggered_ = false;
     running_ = true;
@@ -233,7 +236,6 @@ void ControlService::send_service_discovery_response() {
 
     send(static_cast<uint16_t>(ControlMessageType::ServiceDiscoveryResponse),
          serialize(resp));
-    AA_LOG_I("sent ServiceDiscoveryResponse (%d channels)", resp.channels_size());
 }
 
 void ControlService::send_ping() {
@@ -274,7 +276,7 @@ void ControlService::on_session_stop() {
 }
 
 void ControlService::initiate_bye() {
-    AA_LOG_I("initiating ByeBye");
+    AA_LOG_I("%-18s %-24s", "control", "BYEBYE_INITIATING");
     pb_ctrl::ByeByeRequest bye;
     bye.set_reason(pb_ctrl::USER_SELECTION);
     send(static_cast<uint16_t>(ControlMessageType::ByeByeRequest), serialize(bye));
