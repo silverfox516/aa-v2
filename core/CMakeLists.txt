@@ -66,3 +66,30 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         -Wno-error=deprecated-literal-operator
         -Wno-error=gcc-compat)
 endif()
+
+# AddressSanitizer + UndefinedBehaviorSanitizer for the host CMake build.
+# Enable with: cmake -DENABLE_SANITIZERS=ON ..
+#
+# Effect: every memory access is verified against shadow memory at run
+# time, and undefined-behavior-prone operations (signed overflow, null
+# deref, bad casts, etc.) are checked. Buffer overruns, use-after-free,
+# leaks, double-free, and a long list of UB patterns abort with a
+# precise stack trace on first occurrence.
+#
+# Cost: ~2-5x slower test runtime, larger memory footprint. Production
+# device builds (Android.bp) do NOT enable these — host test builds only.
+#
+# Public link options propagate to anything linking aauto-core (i.e.
+# the test executable), so a single switch covers the whole binary.
+option(ENABLE_SANITIZERS
+       "Build with AddressSanitizer + UndefinedBehaviorSanitizer (host only)"
+       OFF)
+
+if(ENABLE_SANITIZERS)
+    set(_san_flags
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer)
+    target_compile_options(aauto-core PUBLIC ${_san_flags})
+    target_link_options(aauto-core PUBLIC ${_san_flags})
+    message(STATUS "Sanitizers enabled: address + undefined")
+endif()

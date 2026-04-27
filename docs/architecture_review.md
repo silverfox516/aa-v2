@@ -829,11 +829,17 @@ video cadence를 throttle한다. 비용이 작지 않다.
 
 #### G.5.2 6.2 ASan/UBSan in test builds
 
-- **현재**: NOT STARTED.
-- **판단**: 학습 가치 ↑↑ — memory safety 이슈는 실기기 디버깅에서
-  reproduce 어려움. CI 환경에서 sanitizer로 잡으면 학습 자료
-  (troubleshooting.md)가 풍부해짐. 우선순위 높이기 권장.
-- **트리거**: 즉시. 비용 ≈ CMake 옵션 한 줄 + CI job 하나.
+- **현재**: **DONE (2026-04-27)**. `core/CMakeLists.txt`에
+  `ENABLE_SANITIZERS` 옵션 추가. `cmake -DENABLE_SANITIZERS=ON ..` 후
+  `ctest`로 48개 단위 테스트가 AddressSanitizer + UndefinedBehaviorSanitizer
+  켜진 상태에서 모두 clean pass. host CMake 빌드 전용 (Android.bp 디바이스
+  빌드는 영향 없음).
+- **얻은 것**: BufferedTransport / Framer / Session / encrypt 경로 등
+  byte buffer를 다루는 새 코드들에 대한 memory safety + UB-free 증거
+  layer 한 단계 추가. 향후 의심 시 sanitizer 빌드를 즉시 디버깅 무기로
+  활용 가능.
+- **앞으로**: 새 native 코드 추가할 때마다 sanitizer 빌드로 한 번 더
+  검증 권장. CI에 sanitizer job 추가는 자연스러운 다음 단계.
 
 #### G.5.3 6.3 Framer + crypto envelope fuzzing
 
