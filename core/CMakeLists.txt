@@ -39,6 +39,7 @@ add_library(aauto-core STATIC
     src/service/MediaBrowserService.cpp
     src/service/BluetoothService.cpp
     src/service/VendorExtensionService.cpp
+    src/transport/BufferedTransport.cpp
     src/engine/Engine.cpp
     src/crypto/AapKeys.cpp
 )

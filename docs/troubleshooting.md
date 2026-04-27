@@ -354,6 +354,15 @@ architecture (AIDL process boundary). Reference uses JNI with native
 AMediaCodec (single process, zero-copy). Full fix requires native
 video decoding or SharedMemory for frame transfer.
 
+**Update 2026-04-27**: Phase 4 stub channels were a separate cause of
+visible lag spikes during scroll (cadence dropped to 5-10fps); see #22
+for the full analysis. After unregistering them and adding
+`BufferedTransport` (F.19) so underlying transport reads are no longer
+serialized behind upper-layer processing, sustained scroll cadence
+recovered to 30fps and end-to-end input-to-display lag dropped from
+~400ms to ~300ms — within the F.12 baseline. Further reduction now
+truly requires the SharedMemory / JNI changes called out above.
+
 **5GHz AP**: TCC803x WiFi chip supports 5GHz (Band 2), but SoftApManager
 requires a valid country code. `iw reg set`, `settings put`, `setprop
 persist.vendor.wifi.country` all failed at runtime. Requires platform

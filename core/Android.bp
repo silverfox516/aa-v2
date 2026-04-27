@@ -59,6 +59,7 @@ cc_library_static {
         "src/service/MediaBrowserService.cpp",
         "src/service/BluetoothService.cpp",
         "src/service/VendorExtensionService.cpp",
+        "src/transport/BufferedTransport.cpp",
         "src/engine/Engine.cpp",
         "src/crypto/AapKeys.cpp",
     ],

@@ -22,6 +22,8 @@
 #include "../../common/crypto/OpenSslCryptoStrategy.hpp"
 #include "../aidl/AidlEngineController.hpp"
 
+#include "aauto/transport/BufferedTransport.hpp"
+
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
 #include <binder/ProcessState.h>
@@ -77,6 +79,7 @@ public:
             return std::stoi(descriptor.substr(pos + key.size() + 1));
         };
 
+        std::shared_ptr<transport::ITransport> underlying;
         if (descriptor.find("usb:") == 0) {
             int fd = parse_int("fd");
             int ep_in = parse_int("ep_in");
@@ -85,22 +88,30 @@ public:
                 AA_LOG_E("invalid USB descriptor: %s", descriptor.c_str());
                 return nullptr;
             }
-            return std::make_shared<impl::AndroidUsbTransport>(
+            underlying = std::make_shared<impl::AndroidUsbTransport>(
                 executor, fd, ep_in, ep_out);
-        }
-
-        if (descriptor.find("tcp:") == 0) {
+        } else if (descriptor.find("tcp:") == 0) {
             int fd = parse_int("fd");
             if (fd < 0) {
                 AA_LOG_E("invalid TCP descriptor: %s", descriptor.c_str());
                 return nullptr;
             }
-            return std::make_shared<impl::AndroidTcpTransport>(
+            underlying = std::make_shared<impl::AndroidTcpTransport>(
                 executor, fd);
+        } else {
+            AA_LOG_E("unknown transport descriptor: %s", descriptor.c_str());
+            return nullptr;
         }
 
-        AA_LOG_E("unknown transport descriptor: %s", descriptor.c_str());
-        return nullptr;
+        // Wrap in BufferedTransport so the underlying transport keeps
+        // reading regardless of upper-layer processing speed (see
+        // BufferedTransport.hpp). The wrap is done here, in the platform
+        // factory, so every transport implementation gets the behavior
+        // for free without per-platform duplication.
+        auto buffered =
+            std::make_shared<transport::BufferedTransport>(std::move(underlying));
+        buffered->start();
+        return buffered;
     }
 };
 

@@ -670,6 +670,55 @@ Test seam이 디자인의 부산물이 아니라 핵심.
     custom 케이블 등)를 붙일 때 동일 모양으로 새 코디네이터만 만들면
     호스트 수정이 거의 없다 — 학습 결과의 직접적 활용 형태.
 
+### F.19 BufferedTransport — transport read를 윗 레이어와 분리 (2026-04-27)
+
+- **배경**: `Session::start_read()` → `on_read_complete()` →
+  `InboundAssembler.feed()` → `start_read()` 패턴이라, 윗 레이어 처리
+  (decrypt, framer reassemble, dispatch, sink callback)가 끝나야 다음
+  underlying read가 발행된다. 사용자 요구는 명확했다: **"transport에서
+  읽을 게 있으면 항상 바로 읽어야 하고, 쓸 게 있으면 항상 바로 써야
+  한다"**. 현재 RX 구조는 이 요구를 어긴다.
+
+- **대안**:
+  - (a) 각 platform-specific transport (`AndroidUsbTransport`,
+    `AndroidTcpTransport` 등)에 자체 internal read queue를 둠
+  - (b) core에 `BufferedTransport` decorator를 두고 모든 transport를
+    wrap
+  - (c) `Session`이 multi-buffer로 outstanding read를 여러 개 발행
+
+- **선택**: (b). `core/transport/BufferedTransport`는 `ITransport`를
+  구현하면서 다른 `ITransport`를 wrap. 내부 `rx_queue`(deque) + 자동
+  read 루프. underlying.async_read는 윗 레이어 처리와 무관하게 항상
+  진행되고, 받은 chunk는 queue에 쌓였다가 `Session::async_read` 호출
+  시 즉시 deliver된다.
+
+- **근거**:
+  - (a)는 platform 추가할 때마다 같은 로직 반복. Hexagonal 원칙
+    위반(횡단 관심사가 adapter에 분산).
+  - (b)는 정확히 decorator 패턴 — port 인터페이스 그대로 두고 core가
+    cross-cutting 동작을 추상화. 향후 어떤 transport (USB / TCP / 가상
+    transport / 또 다른 platform)든 무료로 적용된다.
+  - (c)는 ITransport 계약 변경(여러 outstanding read 허용)이 필요해
+    파급 큼. 또 ITransport 구현체마다 동시 read 처리 로직 추가 필요.
+
+- **영향**:
+  - `impl/android/main/main.cpp`의 `AndroidTransportFactory`가
+    underlying transport를 만든 직후 `BufferedTransport`로 wrap +
+    `start()` 호출. 단 한 곳.
+  - `Session`은 변경 없음 — `ITransport`로 받아 그대로 사용.
+  - 검증: 실기기 USB scroll 테스트에서 input-to-display lag이 ~400ms
+    → ~300ms로 약 100ms 감소. 차이의 출처는 strand가 더 이상 underlying
+    read와 직렬되지 않아 큰 RX 메시지 처리 중에도 다음 read가 진행되는
+    효과.
+  - 잔여 ~300ms는 troubleshooting.md #18에 기록된 F.12 IPC 비용
+    baseline (200-300ms) 범위. 추가 단축은 SharedMemory / JNI 단일
+    프로세스 같은 큰 구조 변경 필요.
+  - `BufferedTransport`의 RX queue는 max 32 chunk (≈ 512KB) — 윗 레이어가
+    크게 밀릴 때 oldest chunk drop + 경고 로그. 무한 메모리 증가 방지.
+  - TX는 forward만(underlying에 위임). underlying transport(USB/TCP)가
+    이미 자체 dedicated write thread + queue를 가지고 있어 추가 buffering
+    불필요.
+
 ---
 
 ## Part G. Scoping Decisions (학습 우선순위 적용)
