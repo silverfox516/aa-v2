@@ -1,5 +1,23 @@
 # Project Guidelines
 
+## Project Goal
+
+H/U에서 동작하는 AA 어플리케이션 작성을 통해 AA 분석하여 AA 포팅 작업 시 필요한 능력 확보.
+
+- AA 동작에 필요한 플랫폼 사이드의 요구, 제한 사항, 기술들 파악, 확보
+- AAP 메시지들의 역할과 실 동작에서의 송수신
+- 이를 위한 어플리케이션의 이상적 구조 설계, 확보
+
+이 프로젝트는 출시용 제품이 아니라 학습/분석/포팅 능력 확보가 목적이다.
+범위와 우선순위를 정할 때 다음을 따른다:
+
+- 풀 구현 vs stub은 학습 가치로 판단한다. 의미 없는 풀 구현보다, 동작 관찰을
+  가능하게 하는 최소 stub이 더 가치 있을 수 있다.
+- 코드 품질만큼 문서(architecture_review.md, protocol.md, aap_messages.md,
+  troubleshooting.md)도 산출물이다. 알게 된 것은 반드시 기록한다.
+- "이상적 구조"는 슬로건이 아니라 실제 평가 기준이다. 시간 절약을 위한
+  타협 구조는 채택하지 않는다 — 더 시간이 들어도 옳은 구조를 우선한다.
+
 ## Code Quality
 
 - Before writing code, consider appropriate design patterns (Strategy, Factory, RAII, etc.) and overall structure.
