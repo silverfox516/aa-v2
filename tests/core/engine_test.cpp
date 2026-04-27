@@ -63,6 +63,8 @@ public:
 
 class FakeServiceFactory : public IServiceFactory {
 public:
+    void set_session_id(uint32_t id) override { last_session_id = id; }
+
     std::map<int32_t, std::shared_ptr<service::IService>>
     create_services(service::SendMessageFn) override {
         ++create_count;
@@ -70,6 +72,7 @@ public:
     }
 
     int create_count = 0;
+    uint32_t last_session_id = 0;
 };
 
 class RecordingEngineCallback : public IEngineCallback {
@@ -95,6 +98,7 @@ public:
     void on_phone_identified(uint32_t, const std::string&, const std::string&) override {}
     void on_video_data(uint32_t, const uint8_t*, std::size_t, int64_t, bool) override {}
     void on_audio_data(uint32_t, uint32_t, const uint8_t*, std::size_t, int64_t) override {}
+    void on_video_focus_changed(uint32_t, bool) override {}
 
     bool wait_for_state(SessionStatus wanted,
                         std::chrono::milliseconds timeout = std::chrono::milliseconds(1000)) {

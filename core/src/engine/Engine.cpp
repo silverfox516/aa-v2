@@ -156,7 +156,9 @@ void Engine::on_session_state_changed(uint32_t session_id,
     }
 
     if (callback_) {
-        SessionStatus status;
+        // Initialized to silence GCC false-positive maybe-uninitialized;
+        // the switch below is exhaustive over SessionState.
+        SessionStatus status = SessionStatus::Disconnected;
         switch (state) {
             case session::SessionState::Idle:
                 status = SessionStatus::Connecting;

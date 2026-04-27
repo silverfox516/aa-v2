@@ -32,6 +32,10 @@ add_library(aauto-core STATIC
     src/service/SensorService.cpp
     src/service/ControlService.cpp
     src/service/MicrophoneService.cpp
+    src/service/NavigationStatusService.cpp
+    src/service/PhoneStatusService.cpp
+    src/service/MediaPlaybackService.cpp
+    src/service/GenericNotificationService.cpp
     src/engine/Engine.cpp
     src/crypto/AapKeys.cpp
 )
@@ -41,7 +45,20 @@ target_include_directories(aauto-core PUBLIC
 
 target_link_libraries(aauto-core PUBLIC asio aap_protobuf)
 
+# Mirror core/Android.bp warning set so the host CMake build matches the
+# device build. -Wpedantic is intentionally NOT used: external headers
+# (asio, abseil via protobuf) rely on compiler extensions like __int128
+# which would trip pedantic and cannot be fixed upstream.
 target_compile_options(aauto-core PRIVATE
-    -Wall -Wextra -Wpedantic -Werror
-    -Wno-error=deprecated-literal-operator
-    -Wno-error=gcc-compat)
+    -Wall -Wextra -Werror
+    -Wno-implicit-fallthrough)
+
+# Clang-only suppressions: -Wunused-private-field exists only in clang;
+# the deprecated-literal-operator/gcc-compat warnings are emitted only by
+# newer clang inside external headers (asio, abseil).
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(aauto-core PRIVATE
+        -Wno-unused-private-field
+        -Wno-error=deprecated-literal-operator
+        -Wno-error=gcc-compat)
+endif()
