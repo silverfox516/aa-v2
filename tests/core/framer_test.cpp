@@ -10,11 +10,21 @@ using namespace aauto;
 using namespace aauto::session;
 
 // Helper: build a raw wire frame from components.
+// For multi-first fragments (FragInfo::First, i.e., first of a multi-fragment
+// message), inserts the 4-byte big-endian total_size field between the header
+// and payload as required by the AAP wire protocol. `total_size` is ignored
+// for non-multi-first frames.
 static std::vector<uint8_t> make_wire_frame(uint8_t channel_id,
                                             FragInfo frag,
                                             bool encrypted,
-                                            const std::vector<uint8_t>& payload) {
-    uint8_t flags = static_cast<uint8_t>(frag) | (encrypted ? 0x08 : 0x00);
+                                            const std::vector<uint8_t>& payload,
+                                            uint32_t total_size = 0) {
+    uint8_t frag_bits = static_cast<uint8_t>(frag);
+    bool is_first = (frag_bits & 0x01) != 0;
+    bool is_last  = (frag_bits & 0x02) != 0;
+    bool is_multi_first = is_first && !is_last;
+
+    uint8_t flags = frag_bits | (encrypted ? 0x08 : 0x00);
     uint16_t len = static_cast<uint16_t>(payload.size());
 
     std::vector<uint8_t> wire;
@@ -22,6 +32,12 @@ static std::vector<uint8_t> make_wire_frame(uint8_t channel_id,
     wire.push_back(flags);
     wire.push_back(static_cast<uint8_t>((len >> 8) & 0xFF));
     wire.push_back(static_cast<uint8_t>(len & 0xFF));
+    if (is_multi_first) {
+        wire.push_back(static_cast<uint8_t>((total_size >> 24) & 0xFF));
+        wire.push_back(static_cast<uint8_t>((total_size >> 16) & 0xFF));
+        wire.push_back(static_cast<uint8_t>((total_size >> 8) & 0xFF));
+        wire.push_back(static_cast<uint8_t>(total_size & 0xFF));
+    }
     wire.insert(wire.end(), payload.begin(), payload.end());
     return wire;
 }
@@ -91,7 +107,9 @@ TEST_F(FramerTest, DecodePartialHeader) {
 // ===== Fragmented frames =====
 
 TEST_F(FramerTest, DecodeFragments) {
-    auto wire1 = make_wire_frame(5, FragInfo::First, false, {0x01, 0x02, 0x03});
+    // Total reassembled payload size = 3 + 2 + 1 = 6 bytes.
+    auto wire1 = make_wire_frame(5, FragInfo::First, false,
+                                 {0x01, 0x02, 0x03}, /*total_size=*/6);
     auto wire2 = make_wire_frame(5, FragInfo::Continuation, false, {0x04, 0x05});
     auto wire3 = make_wire_frame(5, FragInfo::Last, false, {0x06});
 
@@ -166,4 +184,40 @@ TEST_F(FramerTest, EncodeDecodeRoundTrip) {
     ASSERT_EQ(received_.size(), 1u);
     EXPECT_EQ(received_[0].channel_id, 7);
     EXPECT_EQ(received_[0].payload, out.payload);
+}
+
+// Verifies that a payload large enough to require fragmentation can be
+// encoded and then decoded back to the original byte sequence. Catches
+// regressions where encode and decode disagree on the multi-first
+// 4-byte total_size field layout.
+TEST_F(FramerTest, EncodeDecodeMultiFragmentRoundTrip) {
+    OutboundFrame out;
+    out.channel_id = 5;
+    out.flags = compute_frame_flags(5, 0x0001, false);
+    out.payload.resize(kMaxFramePayloadSize + 1000);
+    for (std::size_t i = 0; i < out.payload.size(); ++i) {
+        out.payload[i] = static_cast<uint8_t>(i & 0xFF);
+    }
+
+    auto wire_frames = framer_.encode(out);
+    ASSERT_GE(wire_frames.size(), 2u);
+
+    for (auto& wire : wire_frames) {
+        framer_.feed(wire.data(), wire.size(), handler());
+    }
+
+    ASSERT_EQ(received_.size(), wire_frames.size());
+
+    std::vector<uint8_t> reassembled;
+    for (auto& frag : received_) {
+        reassembled.insert(reassembled.end(),
+                           frag.payload.begin(), frag.payload.end());
+    }
+    EXPECT_EQ(reassembled.size(), out.payload.size());
+    EXPECT_EQ(reassembled, out.payload);
+
+    EXPECT_TRUE(received_.front().is_first);
+    EXPECT_FALSE(received_.front().is_last);
+    EXPECT_FALSE(received_.back().is_first);
+    EXPECT_TRUE(received_.back().is_last);
 }

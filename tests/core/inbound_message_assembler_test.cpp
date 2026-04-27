@@ -40,11 +40,21 @@ public:
     void reset() override {}
 };
 
+// For multi-first fragments (FragInfo::First, i.e., first of a multi-fragment
+// message), inserts the 4-byte big-endian total_size field between the header
+// and payload as required by the AAP wire protocol. `total_size` is ignored
+// for non-multi-first frames.
 std::vector<uint8_t> make_wire_frame(uint8_t channel_id,
                                      FragInfo frag,
                                      bool encrypted,
-                                     const std::vector<uint8_t>& payload) {
-    uint8_t flags = static_cast<uint8_t>(frag) | (encrypted ? kFlagEncrypted : 0);
+                                     const std::vector<uint8_t>& payload,
+                                     uint32_t total_size = 0) {
+    uint8_t frag_bits = static_cast<uint8_t>(frag);
+    bool is_first = (frag_bits & 0x01) != 0;
+    bool is_last  = (frag_bits & 0x02) != 0;
+    bool is_multi_first = is_first && !is_last;
+
+    uint8_t flags = frag_bits | (encrypted ? kFlagEncrypted : 0);
     uint16_t len = static_cast<uint16_t>(payload.size());
 
     std::vector<uint8_t> wire;
@@ -52,6 +62,12 @@ std::vector<uint8_t> make_wire_frame(uint8_t channel_id,
     wire.push_back(flags);
     wire.push_back(static_cast<uint8_t>((len >> 8) & 0xFF));
     wire.push_back(static_cast<uint8_t>(len & 0xFF));
+    if (is_multi_first) {
+        wire.push_back(static_cast<uint8_t>((total_size >> 24) & 0xFF));
+        wire.push_back(static_cast<uint8_t>((total_size >> 16) & 0xFF));
+        wire.push_back(static_cast<uint8_t>((total_size >> 8) & 0xFF));
+        wire.push_back(static_cast<uint8_t>(total_size & 0xFF));
+    }
     wire.insert(wire.end(), payload.begin(), payload.end());
     return wire;
 }
@@ -79,7 +95,9 @@ TEST(InboundMessageAssemblerTest, ReassemblesEncryptedFragments) {
     InboundMessageAssembler assembler(crypto, [](const std::error_code&) {});
     std::vector<AapMessage> messages;
 
-    auto wire1 = make_wire_frame(1, FragInfo::First, true, {0x80, 0x02, 0x01});
+    // Total reassembled (encrypted) payload size = 3 + 2 = 5 bytes.
+    auto wire1 = make_wire_frame(1, FragInfo::First, true,
+                                 {0x80, 0x02, 0x01}, /*total_size=*/5);
     auto wire2 = make_wire_frame(1, FragInfo::Last, true, {0x02, 0x03});
 
     assembler.feed(wire1.data(), wire1.size(),

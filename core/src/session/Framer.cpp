@@ -81,30 +81,40 @@ std::vector<std::vector<uint8_t>> Framer::encode(const OutboundFrame& frame) {
         result.push_back(std::move(wire));
     } else {
         std::size_t offset = 0;
-        bool first = true;
 
         while (offset < payload.size()) {
             std::size_t remaining = payload.size() - offset;
             std::size_t chunk_size = std::min(remaining,
                                               static_cast<std::size_t>(kMaxFramePayloadSize));
-            bool last = (offset + chunk_size >= payload.size());
+            bool is_first_fragment = (offset == 0);
+            bool is_last_fragment  = (offset + chunk_size >= payload.size());
 
             FragInfo frag_info;
-            if (first) {
+            if (is_first_fragment) {
                 frag_info = FragInfo::First;
-                first = false;
-            } else if (last) {
+            } else if (is_last_fragment) {
                 frag_info = FragInfo::Last;
             } else {
                 frag_info = FragInfo::Continuation;
             }
 
-            std::vector<uint8_t> wire(kFrameHeaderSize + chunk_size);
+            // Multi-first fragments carry a 4-byte big-endian total_size
+            // field between the header and payload. Decoder skips this
+            // field via the matching multi_first logic in try_parse_fragment.
+            std::size_t total_size_field = is_first_fragment ? 4 : 0;
+            std::vector<uint8_t> wire(kFrameHeaderSize + total_size_field + chunk_size);
             wire[0] = frame.channel_id;
             wire[1] = (frame.flags & 0xFC) | static_cast<uint8_t>(frag_info);
             wire[2] = static_cast<uint8_t>((chunk_size >> 8) & 0xFF);
             wire[3] = static_cast<uint8_t>(chunk_size & 0xFF);
-            std::memcpy(wire.data() + kFrameHeaderSize,
+            if (is_first_fragment) {
+                uint32_t total = static_cast<uint32_t>(payload.size());
+                wire[4] = static_cast<uint8_t>((total >> 24) & 0xFF);
+                wire[5] = static_cast<uint8_t>((total >> 16) & 0xFF);
+                wire[6] = static_cast<uint8_t>((total >> 8) & 0xFF);
+                wire[7] = static_cast<uint8_t>(total & 0xFF);
+            }
+            std::memcpy(wire.data() + kFrameHeaderSize + total_size_field,
                         payload.data() + offset, chunk_size);
             result.push_back(std::move(wire));
 
