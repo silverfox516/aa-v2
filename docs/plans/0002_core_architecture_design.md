@@ -1,7 +1,7 @@
 # 0002 — Core Architecture Design
 
 > Created: 2026-04-16
-> Status: DRAFT
+> Status: IMPLEMENTED (verified on real device 2026-04-21; refined through F.16 — see architecture_review.md)
 > Approach: First-principles design from proto definitions + F.1~F.11 decisions
 > Reference code: NOT consulted (by design — see 0001 Phase 0a)
 

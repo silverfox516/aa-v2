@@ -1,8 +1,15 @@
 # 0003 — Phase 5 Minimal: AIDL Daemon + App Layer for Device Testing
 
 > Created: 2026-04-17
-> Status: APPROVED
+> Status: DONE (verified on real device 2026-04-21)
 > Scope: Minimum viable app layer to test handshake with real phone
+>
+> **Implementation status (2026-04-27)**: All steps completed. Several originally
+> deferred items have since been implemented as part of later work:
+> - SessionManager → `app/android/src/com/aauto/app/SessionManager.java` (multi-session tracking, F.13)
+> - DeviceListActivity → wireless/USB device list UI
+> - BtMonitor / WifiMonitor → covered by `BluetoothWirelessManager` and `WirelessStateTracker` in 0004
+> - Multi-session → enabled via `SessionManager` (F.13)
 
 ---
 
@@ -12,7 +19,7 @@ Get a real phone connected via USB -> accessory mode -> SSL handshake ->
 service discovery, visible in logcat. This unblocks Phase 1 exit criteria
 and provides the foundation for Phase 2/3/4 work.
 
-## NOT in scope (deferred)
+## NOT in scope (deferred — see status note above for items completed since)
 
 - SessionManager, DeviceRegistry (multi-device tracking)
 - BtMonitor, WifiMonitor (wireless AA)

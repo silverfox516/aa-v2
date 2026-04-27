@@ -3,6 +3,16 @@
 > Created: 2026-04-16
 > Status: APPROVED
 > Approach: Vertical Slice (feature-first, not layer-first)
+>
+> **Implementation status (2026-04-27)**:
+> - Phase 0a / 0b: DONE (see 0002, protocol.md)
+> - Phase 1 (Walking Skeleton): DONE — sinks relocated per F.12 (see Phase 1 note)
+> - Phase 2 (Audio): DONE — sinks relocated per F.12
+> - Phase 3 (Input): DONE — input source relocated to Java app
+> - Phase 4 (Remaining services): 5 of 8 fully done + 3 stubs (MediaBrowser/Bluetooth/VendorExtension), plus 2 extras (Control, Microphone); see Phase 4 status
+> - Phase 5 (AIDL daemon + App): DONE (see 0003)
+> - Phase 6 (Hardening): see per-item status table — only 6.5 (multi-session) fully done; 6.1 / 6.4 partial; 6.2 / 6.3 / 6.7 not started; 6.6 / 6.8 not verified
+> - Wireless AA (added later as a separate track, also originally labelled "Phase 6"): DONE (see 0004)
 
 ---
 
@@ -73,7 +83,7 @@ The absolute minimum vertical slice proving the architecture works end-to-end.
 | `Engine` | core | owns asio io_context, creates Session |
 | `VideoService` | core/service | video channel message handling |
 | `IVideoSink` | core port | onVideoFrame(H264 NAL unit) |
-| `AMediaCodecVideoSink` | impl/android | NDK AMediaCodec -> Surface |
+| `CallbackVideoSink` | core/sink | forwards H.264 NAL units to a callback (used by AIDL bridge per F.12) |
 | Logger | core/utils | AA_LOG_* macros |
 | Build system | root | Android.bp + CMakeLists.txt for all above |
 
@@ -84,6 +94,13 @@ The absolute minimum vertical slice proving the architecture works end-to-end.
 - App layer (MainActivity, discovery monitors)
 - Multi-session support
 - IEngineController IPC
+
+### F.12 update (2026-04-21)
+
+Video decoding moved out of native into the app process. The native side now uses
+`CallbackVideoSink`, which forwards encoded H.264 NAL units via AIDL
+(`onVideoData`) to Java `VideoDecoder` (MediaCodec → Surface).
+The originally planned native `AMediaCodecVideoSink` is intentionally not built.
 
 ### Temporary shortcuts (to be removed later)
 
@@ -113,7 +130,7 @@ The absolute minimum vertical slice proving the architecture works end-to-end.
 |-----------|-------|-------|
 | `AudioService` | core/service | audio channel message handling, multi-stream (media/guidance/call) |
 | `IAudioSink` | core port | onAudioData(PCM), configure(sample rate, channels) |
-| `AAudioSink` | impl/android | NDK AAudio output |
+| `CallbackAudioSink` | core/sink | forwards PCM via AIDL (`onAudioData`) to Java `AudioPlayer` per F.12 |
 | Audio focus | impl/android | Android AudioManager integration for focus arbitration |
 
 ### Test plan
@@ -136,7 +153,7 @@ The absolute minimum vertical slice proving the architecture works end-to-end.
 |-----------|-------|-------|
 | `InputService` | core/service | input channel message handling |
 | `IInputSource` | core port | onTouchEvent, onKey |
-| `TouchInputSource` | impl/android | Android Surface touch events -> AAP input messages |
+| Touch dispatch | app/android (Java) | `AaDisplayActivity.onTouchEvent` forwards touch events to engine via AIDL — replaces the originally planned native `TouchInputSource` |
 
 ### Test plan
 
@@ -154,16 +171,23 @@ The absolute minimum vertical slice proving the architecture works end-to-end.
 
 **Goal**: Complete all AAP service channels.
 
-| Service | Channel | Priority |
-|---------|---------|----------|
-| NavigationStatusService | navigation status | HIGH — turn-by-turn display |
-| PhoneStatusService | phone status | MEDIUM — battery, signal display |
-| SensorService + ISensorSource + SensorSource | sensor data | HIGH — GPS for navigation |
-| MediaBrowserService | media browsing | LOW — music app browsing |
-| MediaPlaybackService | media playback | MEDIUM — steering wheel controls |
-| BluetoothService | bluetooth | MEDIUM — BT pairing flow |
-| GenericNotificationService | notifications | LOW |
-| VendorExtensionService | vendor | LOW |
+| Service | Channel | Priority | Status |
+|---------|---------|----------|--------|
+| NavigationStatusService | navigation status | HIGH — turn-by-turn display | DONE |
+| PhoneStatusService | phone status | MEDIUM — battery, signal display | DONE |
+| SensorService | sensor data | HIGH — GPS for navigation | DONE (service handler only); `ISensorSource` platform implementation deferred — no platform sensor source is currently wired in |
+| MediaBrowserService | media browsing | LOW — music app browsing | STUB — channel registered, capability advertised; browse tree handlers not implemented |
+| MediaPlaybackService | media playback | MEDIUM — steering wheel controls | DONE |
+| BluetoothService | bluetooth | MEDIUM — BT pairing flow | STUB — advertises HU MAC + pairing methods via `HeadunitConfig::bluetooth_mac` (currently a placeholder value); actual HFP/A2DP pairing flow not implemented |
+| GenericNotificationService | notifications | LOW | DONE |
+| VendorExtensionService | vendor | LOW | STUB — channel registered with placeholder name; no vendor messages defined |
+
+Additional services implemented during Phase 4 that were not in the original plan:
+
+| Service | Channel | Notes |
+|---------|---------|-------|
+| ControlService | control | session-level control messages (heartbeat, channel open/close, focus) |
+| MicrophoneService | microphone | required by some phones (e.g. Samsung SM-N981N) for handshake |
 
 ### Test plan
 
@@ -223,16 +247,16 @@ session, clean separation. Same functionality as Phase 3 end but properly archit
 
 **Goal**: Production quality — stability, error recovery, testing depth.
 
-| Step | Description |
-|------|-------------|
-| 6.1 | Core unit test coverage >= 80% (gtest + CTest) |
-| 6.2 | ASan/UBSan enabled for test builds, clean run |
-| 6.3 | Framer + crypto envelope fuzzing (libFuzzer or AFL) |
-| 6.4 | Connection error recovery: USB disconnect/reconnect, SSL failure retry |
-| 6.5 | Multi-session support: 2 phones simultaneously (F.3) |
-| 6.6 | Background audio: video sink detach when AA not foreground |
-| 6.7 | QuirksProfile framework (F.10): extensible but empty initially |
-| 6.8 | Performance profiling: latency (USB read -> frame display), CPU usage |
+| Step | Description | Status |
+|------|-------------|--------|
+| 6.1 | Core unit test coverage >= 80% (gtest + CTest) | PARTIAL — 42 tests passing in core; coverage % not measured yet |
+| 6.2 | ASan/UBSan enabled for test builds, clean run | NOT STARTED — no sanitizer flags in build |
+| 6.3 | Framer + crypto envelope fuzzing (libFuzzer or AFL) | NOT STARTED — no fuzz harnesses present |
+| 6.4 | Connection error recovery: USB disconnect/reconnect, SSL failure retry | PARTIAL — same-phone USB↔wireless transport switch covered (F.16); broader recovery unverified |
+| 6.5 | Multi-session support: 2 phones simultaneously (F.3) | DONE — `SessionManager` (F.13) |
+| 6.6 | Background audio: video sink detach when AA not foreground | NOT VERIFIED |
+| 6.7 | QuirksProfile framework (F.10): extensible but empty initially | NOT STARTED |
+| 6.8 | Performance profiling: latency (USB read -> frame display), CPU usage | NOT VERIFIED |
 
 **Exit criteria**: Stable daily-driver quality on TCC803x hardware.
 
