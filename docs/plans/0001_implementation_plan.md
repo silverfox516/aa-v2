@@ -177,7 +177,7 @@ The originally planned native `AMediaCodecVideoSink` is intentionally not built.
 | PhoneStatusService | phone status | MEDIUM — battery, signal display | CLASS EXISTS, NOT REGISTERED — same reason |
 | SensorService | sensor data | HIGH — GPS for navigation | DONE (service handler only); `ISensorSource` platform implementation deferred — no platform sensor source is currently wired in |
 | MediaBrowserService | media browsing | LOW — music app browsing | CLASS EXISTS, NOT REGISTERED — same reason |
-| MediaPlaybackService | media playback | MEDIUM — steering wheel controls | CLASS EXISTS, NOT REGISTERED — was the largest source of stub-induced cadence throttle (76KB MEDIA_CONFIG + 1s MEDIA_START) |
+| MediaPlaybackService | media playback | MEDIUM — steering wheel controls | PASSIVE HANDLER (2026-04-27, G.3b) — PLAYBACK_STATUS / PLAYBACK_METADATA proto-parse + log; PLAYBACK_INPUT (outbound control) not yet wired. No lag impact — confirmed G.0 refinement (handler presence is the relevant signal, not response output) |
 | BluetoothService | bluetooth | MEDIUM — BT pairing flow | CLASS EXISTS, NOT REGISTERED — same reason. `HeadunitConfig::bluetooth_mac` placeholder retained for future re-enable |
 | GenericNotificationService | notifications | LOW | CLASS EXISTS, NOT REGISTERED — same reason |
 | VendorExtensionService | vendor | LOW | CLASS EXISTS, NOT REGISTERED — same reason |

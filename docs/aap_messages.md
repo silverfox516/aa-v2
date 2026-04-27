@@ -227,9 +227,9 @@ CHANNEL_OPEN: ch=1 (video)
 
 | ID | Message | Direction | Phase | Trigger | Role | Status | Verified |
 |----|---------|-----------|-------|---------|------|--------|----------|
-| 32769 | PLAYBACK_STATUS | Phone → HU | runtime | track change / play / pause | 재생 상태 (곡 정보, 위치, 앨범아트) | ⬜ 미구현 (unhandled 로그) | SM-N981N (수신, 76KB MEDIA_CONFIG 포함) |
+| 32769 | PLAYBACK_STATUS | Phone → HU | runtime | 1초 간격 / state 전이 시 | 재생 상태 (state, media_source, playback_seconds, shuffle, repeat) | ✅ passive handler (parse + log) | SM-N981N (PAUSED/PLAYING 전이 + pos 1초 단위 증가 관찰) |
 | 32770 | PLAYBACK_INPUT | HU → Phone | runtime | media key / steering wheel | 재생 제어 (play/pause/skip/seek) | ⬜ 미구현 | |
-| 32771 | PLAYBACK_METADATA | Phone → HU | runtime | metadata available | 메타데이터 (아티스트, 앨범, 장르 등) | ⬜ 미구현 | |
+| 32771 | PLAYBACK_METADATA | Phone → HU | runtime | 곡 변경 / 재생 시작 시 | 메타데이터 (song, artist, album, album_art bytes, duration, rating) | ✅ passive handler (parse + log) | SM-N981N (한국어 곡명 UTF-8 통과; album_art 3KB~90KB 변동) |
 
 ### MediaPlaybackStatus 필드
 - state: PLAYING/PAUSED/STOPPED
@@ -352,7 +352,7 @@ RFCOMM accepted on AAW UUID
 | Microphone | 7 | ✅ | 2 | 0 | 2 (stub) | (advertise만) |
 | Navigation Status | 8 | ⬜ unregistered (G.3a) | 5 | 0 | 5 | — |
 | Phone Status | 9 | ⬜ unregistered (G.3a) | 2 | 0 | 2 | (이전: 수신, unhandled) |
-| Media Playback | 10 | ⬜ unregistered (G.3a) | 3 | 0 | 3 | (이전: 수신, unhandled — lag 원인) |
+| Media Playback | 10 | ✅ passive (G.3b) | 3 | 2 | 1 | SM-N981N (passive handler, lag 영향 없음 — G.0 갱신 룰 검증) |
 | Generic Notification | 11 | ⬜ unregistered (G.3a) | 4 | 0 | 4 | — |
 | Media Browser | 12 | ⬜ unregistered (G.1) | 6 | 0 | 6 | — |
 | Bluetooth | 13 | ⬜ unregistered (G.2) | 4 | 0 | 4 | (이전: 수신, unhandled) |

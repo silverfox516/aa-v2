@@ -752,6 +752,21 @@ video cadence를 throttle한다. 비용이 작지 않다.
 이 발견 자체가 학습 가치 큰 산출물 — "stub vs full = 학습 가치로 판단"
 원칙이 "stub의 hidden cost"라는 새 측면을 가지게 됐다.
 
+**갱신 (2026-04-27)**: MediaPlaybackService를 fill_config-only stub에서
+PLAYBACK_STATUS / PLAYBACK_METADATA를 proto 파싱 + 로그하는 "수신
+핸들러만" 가진 형태로 격상하고 ch 10에 다시 등록. **lag 재발 없음** —
+폰의 video cadence는 30fps 유지. 즉 폰이 보는 신호는 "HU가 응답
+메시지를 보냈는가"가 아니라 "메시지가 실제로 처리되고 있는가"에 가깝다.
+handler가 등록만 되어 있으면(=`ServiceBase`의 unhandled 경로가 아니라
+명시적 handler 경로로 빠지면) 통과. 따라서 G.0 룰의 실용적 표현은:
+
+- **silent stub** (unhandled-only): 비용 큼 (cadence throttle)
+- **passive handler stub** (parse + log + 응답 없음): 안전
+- **full impl** (응답까지): 추가 가치는 application-level (UI 상태 반영 등)
+
+이 정밀화 덕에 G.1~G.3a 항목들의 "재등록 트리거" 비용이 낮아졌다 —
+응답까지 구현 안 해도 핸들러만 추가하면 advertise 가능.
+
 ### G.1 MediaBrowserService (channel 12)
 
 - **현재**: 클래스 존재. **registration 제거됨** (2026-04-27, lag 원인).
@@ -787,20 +802,36 @@ video cadence를 throttle한다. 비용이 작지 않다.
 - **트리거**: 특정 OEM(예: TCC) 고유 기능을 AA로 노출해야 할 사업 요구가
   생기면. 학습 프로젝트로서는 close.
 
-### G.3a Phase 4 응답-없는 서비스들 (NavigationStatus, PhoneStatus, MediaPlayback, GenericNotification)
+### G.3a Phase 4 응답-없는 서비스들 (NavigationStatus, PhoneStatus, GenericNotification)
 
-- **현재**: 클래스 존재. **registration 제거됨** (2026-04-27, lag 원인).
+- **현재**: 클래스 존재. registration 제거됨 (2026-04-27, lag 원인).
   Phase 4에서 처음 추가됐을 땐 advertise + 정식 구현 의도였으나 응답
   핸들러까지는 못 갔음.
-- **왜 등록 안 하는가**: G.0 — advertise만으로 cadence throttle 비용.
-  특히 `media.playback`은 폰이 76KB MEDIA_CONFIG + 1초 간격 26B
-  MEDIA_START를 보내며 가장 큰 영향이었음.
+- **갱신 (2026-04-27)**: G.0 갱신 룰 적용 가능 — passive handler
+  (parse + log)만 추가하면 advertise 안전. 응답까지 만들지 않아도 됨.
 - **풀 구현 시 가치 / 트리거**:
-  - `NavigationStatus`: 클러스터 표시 UI가 있어야 의미. 차량용 cluster
-    HW 통합 시.
-  - `PhoneStatus`: 통화 UI / 배터리 상태 표시 UI 시.
-  - `MediaPlaybackStatus`: 곡 정보 표시 + 미디어 키 제어 UI 시.
-  - `GenericNotification`: 앱 알림 표시 UI 시.
+  - `NavigationStatus`: 클러스터 표시 UI가 있어야 의미. passive handler로
+    먼저 등록해 메시지 구조 학습 → 그 다음 cluster HW 통합 시 풀 구현.
+  - `PhoneStatus`: passive handler로 배터리/신호/통화 메시지 관찰 가치.
+    표시 UI 시 풀 구현.
+  - `GenericNotification`: HU가 SUBSCRIBE 보내야 폰이 NOTIFICATION 보냄
+    — passive handler로는 관찰 못 함. SUBSCRIBE outbound 구현이 진입 조건.
+
+### G.3b MediaPlaybackService — passive handler 등록됨 (2026-04-27)
+
+- **현재**: passive handler 등록 (PLAYBACK_STATUS, PLAYBACK_METADATA
+  proto 파싱 + 로그). MEDIA_PLAYBACK_INPUT (HU→폰 재생 제어)은 미구현.
+- **얻은 학습**:
+  - 폰이 1초 간격으로 PLAYBACK_STATUS 보냄 (state, source app 이름,
+    재생 위치 초 단위, shuffle/repeat)
+  - METADATA는 곡 변경 시 또는 재생 시작 시 한 번 보냄 (song / artist /
+    album / album_art bytes / duration / rating)
+  - album_art 크기는 song마다 천차만별 (3KB ~ 90KB 관찰됨)
+  - 한국어 string은 UTF-8 그대로 통과
+  - lag 영향 없음 — passive handler가 G.0의 "처리되고 있는가" 신호
+    충족
+- **풀 구현 트리거**: HU에 곡 정보 표시 UI 또는 미디어 키 제어 필요 시.
+  그땐 (a) PLAYBACK_INPUT outbound 구현 (b) UI 바인딩 둘 다 추가.
 
 ### G.4 ISensorSource 플랫폼 구현
 

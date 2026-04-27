@@ -193,19 +193,19 @@ public:
         // Channel 7: Microphone source (stub)
         services[7] = std::make_shared<service::MicrophoneService>(send_fn);
 
-        // Channels 8~14 (Nav / PhoneStatus / MediaPlayback / Notification /
-        // MediaBrowser / Bluetooth / VendorExtension) are deliberately NOT
-        // registered. Each of those services has only fill_config + an
-        // unhandled-log path; no protocol responses. When they were
-        // advertised, the phone opened the channels and continued to send
-        // periodic messages on them. The HU's silence caused the phone
-        // to throttle overall video cadence (verified 2026-04-27: scroll
-        // dropped from 30fps to ~5fps; full discussion in
-        // troubleshooting.md #22 and architecture_review.md G.x).
-        //
-        // The service classes themselves are kept in-tree because their
-        // fill_config code documents the proto layout. Re-register here
-        // (with proper response handlers) to actually use a channel.
+        // Channel 10: Media playback status — handlers parse and log
+        // PLAYBACK_STATUS / PLAYBACK_METADATA. Re-enabled 2026-04-27
+        // (was unregistered in troubleshooting #22 because its
+        // fill_config-only state was throttling video cadence).
+        services[10] = std::make_shared<service::MediaPlaybackService>(send_fn);
+
+        // Channels 8 / 9 / 11 / 12 / 13 / 14 (Nav / PhoneStatus /
+        // Notification / MediaBrowser / Bluetooth / VendorExtension)
+        // remain unregistered. Their service classes are still in-tree
+        // (fill_config documents the proto layout) — re-register here
+        // with real response handlers when each channel becomes a
+        // learning target. See architecture_review.md G.0 for the
+        // policy and G.1 / G.2 / G.3 / G.3a for per-channel reasons.
 
         return services;
     }

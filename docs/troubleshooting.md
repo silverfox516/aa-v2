@@ -490,3 +490,13 @@ learning target.
 **Generalized rule**: "advertise without responding" is not a free stub.
 Phone-side scheduling treats unresponsive advertised channels as a brake
 on the whole session. Either implement the response or don't advertise.
+
+**Refinement (2026-04-27)**: After re-registering MediaPlaybackService
+with proper proto-parse + log handlers (no actual outbound responses
+sent — the channel is sink-only from HU's perspective), scroll lag did
+NOT come back. Phone cadence stayed at 30fps. So the phone's signal
+isn't "did the HU send a response message back?" — it's something
+closer to "is the upper layer actually consuming this channel's
+messages?" Even a passive parse-and-log handler counts. The G.0 rule
+stays — silent stubs are not free — but the bar for "responsive" is
+lower than initially feared: registering a handler is enough.
