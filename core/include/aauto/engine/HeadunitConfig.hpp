@@ -22,6 +22,12 @@ struct HeadunitConfig {
     uint32_t audio_bit_depth   = 16;
     uint32_t audio_channels    = 2;
 
+    // Head unit Bluetooth MAC address advertised via BluetoothService
+    // capability. Placeholder value; should be overridden at runtime
+    // (e.g., from BluetoothAdapter.getAddress() via AIDL) when real
+    // BT pairing is wired up.
+    std::string bluetooth_mac = "02:00:00:00:00:00";
+
     crypto::CryptoConfig crypto_config;
 };
 

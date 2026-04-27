@@ -36,6 +36,9 @@ add_library(aauto-core STATIC
     src/service/PhoneStatusService.cpp
     src/service/MediaPlaybackService.cpp
     src/service/GenericNotificationService.cpp
+    src/service/MediaBrowserService.cpp
+    src/service/BluetoothService.cpp
+    src/service/VendorExtensionService.cpp
     src/engine/Engine.cpp
     src/crypto/AapKeys.cpp
 )

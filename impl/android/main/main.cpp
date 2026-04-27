@@ -10,6 +10,9 @@
 #include "aauto/service/PhoneStatusService.hpp"
 #include "aauto/service/MediaPlaybackService.hpp"
 #include "aauto/service/GenericNotificationService.hpp"
+#include "aauto/service/MediaBrowserService.hpp"
+#include "aauto/service/BluetoothService.hpp"
+#include "aauto/service/VendorExtensionService.hpp"
 #include "aauto/sink/CallbackVideoSink.hpp"
 #include "aauto/sink/CallbackAudioSink.hpp"
 #include "aauto/utils/Logger.hpp"
@@ -190,6 +193,18 @@ public:
 
         // Channel 11: Generic notifications
         services[11] = std::make_shared<service::GenericNotificationService>(send_fn);
+
+        // Channel 12: Media browser (stub — advertise capability only)
+        services[12] = std::make_shared<service::MediaBrowserService>(send_fn);
+
+        // Channel 13: Bluetooth (stub — advertises HU MAC + pairing methods;
+        // actual pairing flow is not wired up yet)
+        services[13] = std::make_shared<service::BluetoothService>(
+            send_fn, hu_.bluetooth_mac);
+
+        // Channel 14: Vendor extension (stub — advertise name only)
+        services[14] = std::make_shared<service::VendorExtensionService>(
+            send_fn, std::string("aa-v2-headunit"));
 
         return services;
     }
