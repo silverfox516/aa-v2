@@ -350,13 +350,13 @@ RFCOMM accepted on AAW UUID
 | Input Source | 5 | ✅ | 4 | 3 | 1 | SM-N981N |
 | Sensor Source | 6 | ✅ | 4 | 3 | 1 | SM-N981N |
 | Microphone | 7 | ✅ | 2 | 0 | 2 (stub) | (advertise만) |
-| Navigation Status | 8 | ✅ | 5 | 0 | 5 | (advertise만) |
-| Phone Status | 9 | ✅ | 2 | 0 | 2 | SM-N981N (수신, unhandled) |
-| Media Playback | 10 | ✅ | 3 | 0 | 3 | SM-N981N (수신, unhandled) |
-| Generic Notification | 11 | ✅ | 4 | 0 | 4 | (advertise만) |
-| Media Browser | 12 | ✅ (stub, G.1) | 6 | 0 | 6 | (advertise만) |
-| Bluetooth | 13 | ✅ (stub, G.2) | 4 | 0 | 4 | SM-N981N (수신, unhandled) |
-| Vendor Extension | 14 | ✅ (stub, G.3) | — | 0 | — | (advertise만) |
+| Navigation Status | 8 | ⬜ unregistered (G.3a) | 5 | 0 | 5 | — |
+| Phone Status | 9 | ⬜ unregistered (G.3a) | 2 | 0 | 2 | (이전: 수신, unhandled) |
+| Media Playback | 10 | ⬜ unregistered (G.3a) | 3 | 0 | 3 | (이전: 수신, unhandled — lag 원인) |
+| Generic Notification | 11 | ⬜ unregistered (G.3a) | 4 | 0 | 4 | — |
+| Media Browser | 12 | ⬜ unregistered (G.1) | 6 | 0 | 6 | — |
+| Bluetooth | 13 | ⬜ unregistered (G.2) | 4 | 0 | 4 | (이전: 수신, unhandled) |
+| Vendor Extension | 14 | ⬜ unregistered (G.3) | — | 0 | — | — |
 | Radio | - | ⬜ | 25 | 0 | 25 | |
 | WiFi Projection | - | ⬜ | 2 | 0 | 2 | |
 | AAW (RFCOMM) | - | N/A | 7 | 7 | 0 | SM-N981N |

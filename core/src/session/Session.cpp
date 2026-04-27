@@ -137,11 +137,16 @@ void Session::send_touch_event(int32_t x, int32_t y, int32_t action) {
 
 void Session::send_message(uint8_t channel_id, uint16_t message_type,
                            const std::vector<uint8_t>& payload) {
-    // Centralized TX logging — suppress noisy messages (ACK, PING, MEDIA_DATA)
+    // Centralized TX logging — suppress noisy per-frame messages
+    // (ACK / PING / MEDIA_DATA / per-touch InputReport).
+    bool is_input_report =
+        channel_id == kInputChannelId
+        && message_type == static_cast<uint16_t>(InputMessageType::InputReport);
     if (message_type != static_cast<uint16_t>(MediaMessageType::Ack)
             && message_type != static_cast<uint16_t>(ControlMessageType::PingRequest)
             && message_type != static_cast<uint16_t>(ControlMessageType::PingResponse)
-            && message_type != static_cast<uint16_t>(MediaMessageType::Data)) {
+            && message_type != static_cast<uint16_t>(MediaMessageType::Data)
+            && !is_input_report) {
         AA_LOG_D("[AAP TX] %-18s %-24s %zu bytes",
                  channel_name(channel_id), msg_type_name(message_type),
                  payload.size());

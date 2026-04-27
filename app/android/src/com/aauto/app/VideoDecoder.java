@@ -54,6 +54,10 @@ public class VideoDecoder {
                     MIME_H264, videoWidth, videoHeight);
             format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+            // KEY_LOW_LATENCY (Android 11+; ignored on 10): hints the
+            // decoder to skip frame reordering and present ASAP. Harmless
+            // on Android 10 — unknown keys are ignored.
+            format.setInteger("low-latency", 1);
             codec.configure(format, surface, null, 0);
             codec.start();
             configured = true;
@@ -85,11 +89,15 @@ public class VideoDecoder {
             inputBuf.put(data, 0, len);
             codec.queueInputBuffer(inputIdx, 0, len, 0, 0);
 
-            // Drain all available output frames to Surface
+            // Drain all available output frames to Surface.
+            // releaseOutputBuffer with explicit nanoTime() avoids the
+            // TCC803x libstagefright ubsan abort triggered by the
+            // (idx, true) form (troubleshooting #6) and renders ASAP
+            // (no vsync wait), which also trims a few ms of latency.
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
             int outputIdx;
             while ((outputIdx = codec.dequeueOutputBuffer(info, 0)) >= 0) {
-                codec.releaseOutputBuffer(outputIdx, true);
+                codec.releaseOutputBuffer(outputIdx, System.nanoTime());
             }
         } catch (IllegalStateException e) {
             Log.w(TAG, "codec error", e);

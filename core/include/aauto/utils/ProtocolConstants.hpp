@@ -11,6 +11,7 @@ namespace aauto {
 
 // ===== AAP Frame Constants =====
 constexpr uint8_t  kControlChannelId    = 0;
+constexpr uint8_t  kInputChannelId      = 5;
 constexpr uint16_t kMaxChannelCount     = 256;
 constexpr uint32_t kMaxFramePayloadSize = 16384;  // 16 KiB
 constexpr uint32_t kFrameHeaderSize     = 4;       // channel(1) + flags(1) + length(2)

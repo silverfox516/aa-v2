@@ -182,29 +182,19 @@ public:
         // Channel 7: Microphone source (stub)
         services[7] = std::make_shared<service::MicrophoneService>(send_fn);
 
-        // Channel 8: Navigation status
-        services[8] = std::make_shared<service::NavigationStatusService>(send_fn);
-
-        // Channel 9: Phone status
-        services[9] = std::make_shared<service::PhoneStatusService>(send_fn);
-
-        // Channel 10: Media playback status
-        services[10] = std::make_shared<service::MediaPlaybackService>(send_fn);
-
-        // Channel 11: Generic notifications
-        services[11] = std::make_shared<service::GenericNotificationService>(send_fn);
-
-        // Channel 12: Media browser (stub — advertise capability only)
-        services[12] = std::make_shared<service::MediaBrowserService>(send_fn);
-
-        // Channel 13: Bluetooth (stub — advertises HU MAC + pairing methods;
-        // actual pairing flow is not wired up yet)
-        services[13] = std::make_shared<service::BluetoothService>(
-            send_fn, hu_.bluetooth_mac);
-
-        // Channel 14: Vendor extension (stub — advertise name only)
-        services[14] = std::make_shared<service::VendorExtensionService>(
-            send_fn, std::string("aa-v2-headunit"));
+        // Channels 8~14 (Nav / PhoneStatus / MediaPlayback / Notification /
+        // MediaBrowser / Bluetooth / VendorExtension) are deliberately NOT
+        // registered. Each of those services has only fill_config + an
+        // unhandled-log path; no protocol responses. When they were
+        // advertised, the phone opened the channels and continued to send
+        // periodic messages on them. The HU's silence caused the phone
+        // to throttle overall video cadence (verified 2026-04-27: scroll
+        // dropped from 30fps to ~5fps; full discussion in
+        // troubleshooting.md #22 and architecture_review.md G.x).
+        //
+        // The service classes themselves are kept in-tree because their
+        // fill_config code documents the proto layout. Re-register here
+        // (with proper response handlers) to actually use a channel.
 
         return services;
     }

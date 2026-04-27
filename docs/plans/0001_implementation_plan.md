@@ -9,7 +9,7 @@
 > - Phase 1 (Walking Skeleton): DONE — sinks relocated per F.12 (see Phase 1 note)
 > - Phase 2 (Audio): DONE — sinks relocated per F.12
 > - Phase 3 (Input): DONE — input source relocated to Java app
-> - Phase 4 (Remaining services): 5 of 8 fully done + 3 stubs (MediaBrowser/Bluetooth/VendorExtension), plus 2 extras (Control, Microphone); see Phase 4 status
+> - Phase 4 (Remaining services): only Sensor + Microphone-stub are registered; the other 6 service classes exist but are NOT registered (advertise-without-response caused phone to throttle video cadence — see G.0 / troubleshooting #22). Plus 2 extras (Control, Microphone). See Phase 4 status table.
 > - Phase 5 (AIDL daemon + App): DONE (see 0003)
 > - Phase 6 (Hardening): see per-item status table — only 6.5 (multi-session) fully done; 6.1 / 6.4 partial; 6.2 / 6.3 / 6.7 not started; 6.6 / 6.8 not verified
 > - Wireless AA (added later as a separate track, also originally labelled "Phase 6"): DONE (see 0004)
@@ -173,14 +173,14 @@ The originally planned native `AMediaCodecVideoSink` is intentionally not built.
 
 | Service | Channel | Priority | Status |
 |---------|---------|----------|--------|
-| NavigationStatusService | navigation status | HIGH — turn-by-turn display | DONE |
-| PhoneStatusService | phone status | MEDIUM — battery, signal display | DONE |
+| NavigationStatusService | navigation status | HIGH — turn-by-turn display | CLASS EXISTS, NOT REGISTERED — fill_config only, no message handlers. Disabled 2026-04-27 (G.0 / troubleshooting #22) |
+| PhoneStatusService | phone status | MEDIUM — battery, signal display | CLASS EXISTS, NOT REGISTERED — same reason |
 | SensorService | sensor data | HIGH — GPS for navigation | DONE (service handler only); `ISensorSource` platform implementation deferred — no platform sensor source is currently wired in |
-| MediaBrowserService | media browsing | LOW — music app browsing | STUB — channel registered, capability advertised; browse tree handlers not implemented |
-| MediaPlaybackService | media playback | MEDIUM — steering wheel controls | DONE |
-| BluetoothService | bluetooth | MEDIUM — BT pairing flow | STUB — advertises HU MAC + pairing methods via `HeadunitConfig::bluetooth_mac` (currently a placeholder value); actual HFP/A2DP pairing flow not implemented |
-| GenericNotificationService | notifications | LOW | DONE |
-| VendorExtensionService | vendor | LOW | STUB — channel registered with placeholder name; no vendor messages defined |
+| MediaBrowserService | media browsing | LOW — music app browsing | CLASS EXISTS, NOT REGISTERED — same reason |
+| MediaPlaybackService | media playback | MEDIUM — steering wheel controls | CLASS EXISTS, NOT REGISTERED — was the largest source of stub-induced cadence throttle (76KB MEDIA_CONFIG + 1s MEDIA_START) |
+| BluetoothService | bluetooth | MEDIUM — BT pairing flow | CLASS EXISTS, NOT REGISTERED — same reason. `HeadunitConfig::bluetooth_mac` placeholder retained for future re-enable |
+| GenericNotificationService | notifications | LOW | CLASS EXISTS, NOT REGISTERED — same reason |
+| VendorExtensionService | vendor | LOW | CLASS EXISTS, NOT REGISTERED — same reason |
 
 Additional services implemented during Phase 4 that were not in the original plan:
 

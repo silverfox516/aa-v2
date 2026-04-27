@@ -659,10 +659,13 @@ Test seam이 디자인의 부산물이 아니라 핵심.
   - `AaService` 줄 수 494 → 413 (-81). implements 3 → 2.
   - `EngineProxyProvider` 역할은 `Supplier<IAAEngine>`(`() -> engineProxy`)
     람다로 충분하므로 별도 인터페이스는 만들지 않았다.
-  - 마지막 implements(`EngineConnectionManager.Callback`) 제거는 후속
-    작업: `Callback` 인터페이스를 `Consumer<IAAEngine>` + `Runnable`
-    한 쌍의 람다로 바꾸면 `AaService`는 `SessionLifecycleListener` 하나만
-    implements하는 상태가 된다 (≤1 목표).
+  - **후속 작업 완료 (2026-04-27)**: `EngineConnectionManager.Callback`
+    인터페이스를 제거하고 생성자에서 `Consumer<IAAEngine>` + `Runnable`
+    람다 두 개를 받도록 단순화했다. 결과 `AaService`는
+    `SessionLifecycleListener` 하나만 implements하는 상태가 됐다 (≤1 목표
+    달성). 줄 수도 413 → 408로 추가 감소. 콜백 인터페이스가 단 두 개의
+    함수만 갖는 경우엔 인터페이스보다 람다가 더 가벼우면서 문서적
+    가치도 동등하다는 패턴 사례.
   - 두 코디네이터는 이제 패턴이 동일하므로, 추가 transport(예: TCP-only
     custom 케이블 등)를 붙일 때 동일 모양으로 새 코디네이터만 만들면
     호스트 수정이 거의 없다 — 학습 결과의 직접적 활용 형태.
@@ -679,41 +682,76 @@ Test seam이 디자인의 부산물이 아니라 핵심.
 > 형식: 항목 / 현재 상태 / 학습 가치 판단 / 풀 구현 시 얻는 추가 가치
 >      / 트리거 조건.
 
+### G.0 (2026-04-27 갱신) "advertise만 하는 stub은 free 아님"
+
+**갱신 전제**: 본 카탈로그 작성 직후 lag 진단(troubleshooting.md #22)
+에서 발견한 사실이 G.1~G.5의 "stub으로 두는 결정" 자체를 흔든다.
+advertise만 하고 응답 안 하는 채널이 ServiceDiscoveryResponse에 들어
+있으면 폰이 그 채널을 열고 메시지를 보내며, 우리 silence가 폰의 전체
+video cadence를 throttle한다. 비용이 작지 않다.
+
+이에 따라 본 시점에 다음 결정을 내림:
+- **응답 핸들러 없는 stub은 ServiceDiscoveryResponse에서도 빼기**
+  (단순히 클래스 등록만 안 함 → 그러면 fill_config가 안 불려서 advertise
+  도 안 됨).
+- **service 클래스 자체는 in-tree에 보존** — 각 클래스의 `fill_config`
+  코드는 proto 구조 documentation 가치가 있음. 향후 풀 구현 시 그대로
+  활용.
+- 결과적으로 G.1~G.4의 "stub" 항목들의 실제 상태는 "service class
+  exists but not registered". advertise = false.
+
+이 발견 자체가 학습 가치 큰 산출물 — "stub vs full = 학습 가치로 판단"
+원칙이 "stub의 hidden cost"라는 새 측면을 가지게 됐다.
+
 ### G.1 MediaBrowserService (channel 12)
 
-- **현재**: stub. ServiceDiscoveryResponse에 capability 등록만, 트리
-  노드 메시지(MEDIA_ROOT_NODE 등) 핸들러 없음.
-- **왜 stub인가**: 풀 구현은 "폰의 미디어 라이브러리 트리를 H/U UI로
-  브라우징"인데, 이건 UI 작업이지 AAP 분석 작업이 아니다. 학습 가치는
-  "phone이 우리 채널에 어떤 메시지를 어떤 순서로 보내는지" 관찰까지로
-  충분 (현재 stub이 unhandled 로그로 캡처 중).
+- **현재**: 클래스 존재. **registration 제거됨** (2026-04-27, lag 원인).
+  advertise 안 함.
+- **왜 등록 안 하는가**: 위 G.0 — advertise하면 폰이 채널 열고 GET_NODE
+  같은 트래픽을 보내는데, 우리 응답이 없으면 cadence 영향. 풀 구현은
+  UI 작업이라 채널 등록만 둘 학습 가치는 (지금 보면) 비용 대비 낮음.
 - **풀 구현 시 가치**: 미디어 트리 메시지 6종(GET_NODE/ROOT/SOURCE/LIST/
   SONG/INPUT)의 실제 wire 형태와 페이지네이션 동작 학습.
-- **트리거**: H/U에 미디어 브라우저 UI를 본격 만들 일이 생기면.
+- **트리거**: H/U에 미디어 브라우저 UI를 본격 만들 일이 생기면 — 그땐
+  registration + 핸들러 모두 추가.
 
 ### G.2 BluetoothService (channel 13)
 
-- **현재**: stub. HU MAC + PIN_ENTRY 페어링 방식 advertise.
-  `HeadunitConfig.bluetooth_mac`는 placeholder("02:00:00:00:00:00").
-  실제 페어링 메시지(BluetoothPairingRequest 등) 핸들러 없음.
-- **왜 stub인가**: 진짜 페어링은 Android BT 스택(Bluedroid) 통합 작업
-  으로, AAP 학습이 아니라 Android BT API 학습. 무선 AA의 BT는
-  RFCOMM(별도 경로)이고 이건 BT HFP/A2DP 페어링 — 별 영역.
+- **현재**: 클래스 존재. **registration 제거됨** (2026-04-27, lag 원인).
+  advertise 안 함. `HeadunitConfig.bluetooth_mac` placeholder
+  ("02:00:00:00:00:00")는 클래스가 살아있는 동안 보존.
+- **왜 등록 안 하는가**: G.0 — advertise하면 폰이 PAIRING_REQUEST를 보내고
+  무응답이면 throttle. 진짜 페어링은 Bluedroid 통합 큰 작업이고 본 학습
+  목표 범위 밖.
 - **풀 구현 시 가치**: AAP가 BT 스택과 어떻게 협력하는지 (HFP 핸즈프리,
   A2DP 미디어 라우팅 협상). 단, A2DP_SINK 충돌 처리가 추가로 필요
-  (4.1 platform constraint 참고).
+  (platform_constraints.md 4.1).
 - **트리거**: AAP-driven BT 페어링 워크플로우를 학습 대상으로 명시할 때.
 
 ### G.3 VendorExtensionService (channel 14)
 
-- **현재**: stub. name="aa-v2-headunit"으로 advertise. 메시지 정의 없음.
-- **왜 stub인가**: vendor extension은 표준 동작이 정의되지 않은 자유 채널.
-  "정의된 동작을 구현"이 아니라 "우리만의 메시지를 만든다"가 본질이라
-  학습 가치가 일반화되지 않는다 (특정 OEM 기능을 만들고 싶을 때만 의미).
+- **현재**: 클래스 존재. **registration 제거됨** (2026-04-27, lag 원인).
+- **왜 등록 안 하는가**: G.0 — advertise만 하고 응답 없으면 lag 비용.
+  vendor extension은 표준 동작이 없으므로 학습 가치도 일반화 안 됨.
 - **풀 구현 시 가치**: 거의 없음 (학습 목표상). vendor message 정의/송수신
   자체는 다른 서비스에서 이미 다 학습됨.
 - **트리거**: 특정 OEM(예: TCC) 고유 기능을 AA로 노출해야 할 사업 요구가
   생기면. 학습 프로젝트로서는 close.
+
+### G.3a Phase 4 응답-없는 서비스들 (NavigationStatus, PhoneStatus, MediaPlayback, GenericNotification)
+
+- **현재**: 클래스 존재. **registration 제거됨** (2026-04-27, lag 원인).
+  Phase 4에서 처음 추가됐을 땐 advertise + 정식 구현 의도였으나 응답
+  핸들러까지는 못 갔음.
+- **왜 등록 안 하는가**: G.0 — advertise만으로 cadence throttle 비용.
+  특히 `media.playback`은 폰이 76KB MEDIA_CONFIG + 1초 간격 26B
+  MEDIA_START를 보내며 가장 큰 영향이었음.
+- **풀 구현 시 가치 / 트리거**:
+  - `NavigationStatus`: 클러스터 표시 UI가 있어야 의미. 차량용 cluster
+    HW 통합 시.
+  - `PhoneStatus`: 통화 UI / 배터리 상태 표시 UI 시.
+  - `MediaPlaybackStatus`: 곡 정보 표시 + 미디어 키 제어 UI 시.
+  - `GenericNotification`: 앱 알림 표시 UI 시.
 
 ### G.4 ISensorSource 플랫폼 구현
 

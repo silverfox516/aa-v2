@@ -437,3 +437,47 @@ transport → phone drops old transport. Two issues:
 Wireless→USB: AOA switch → wireless drops → USB 2s timeout → phone ready → success
 USB→wireless: wireless handshake → onPhoneIdentified → same phone → USB closed immediately
 ```
+
+---
+
+## 22. Stub channel advertise → phone throttles entire video cadence
+
+**Symptom**: Scrolling on USB or wireless drops video from 30fps to
+~5-10fps for 1-5 seconds whenever the user actively scrolls. Once
+scrolling stops the cadence recovers. `write_queue` shows no backpressure
+and transport writes are fast.
+
+**Root cause**: Phase 4 added several "stub" services (PhoneStatus,
+MediaPlayback, GenericNotification, MediaBrowser, Bluetooth,
+VendorExtension) that advertise capability in ServiceDiscoveryResponse
+but only have `fill_config` + an unhandled-log path — no actual response
+to phone messages. The phone opens those channels and continues sending
+periodic messages on them (e.g., `media.playback` MEDIA_START every 1s).
+Our silence appears to make the phone throttle overall video cadence —
+not because of CPU contention on our side (the stub traffic is ~100 B/s
+vs ~210 KB/s of video) but because the phone's AAP scheduler / flow
+control behaves differently when advertised channels are unresponsive.
+
+**Diagnosis (2026-04-27)**:
+- Added `video diag` and Java `video diag (Java RX)` cadence logs:
+  native and Java arrival times were nearly identical (e.g., 172ms vs
+  169ms per frame), proving the AIDL hop is not the cause.
+- Added `write_queue depth` and `slow transport write` logs: never fired
+  (queue stayed at 0~1, no writes >20ms). Rules out our transport
+  backpressure.
+- Disabling stub services 12/13/14 alone did not help (their traffic was
+  small).
+- Disabling 8~14 (especially `media.playback` ch10, which received
+  76KB MEDIA_CONFIG plus periodic 26B MEDIA_START) restored steady
+  30fps under heavy scroll.
+
+**Fix**: Don't register stub services on `IServiceFactory::create_services`.
+Only register channels with real handlers (currently 0~7: control, video,
+audio×3, input, sensor, microphone). The stub service classes themselves
+remain in-tree because their `fill_config` documents the proto layout —
+re-register with proper response handlers when each channel becomes a
+learning target.
+
+**Generalized rule**: "advertise without responding" is not a free stub.
+Phone-side scheduling treats unresponsive advertised channels as a brake
+on the whole session. Either implement the response or don't advertise.
