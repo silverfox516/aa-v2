@@ -64,8 +64,32 @@ void Engine::stop_all() {
 void Engine::set_active_session(uint32_t session_id) {
     AA_LOG_I("set_active_session: id=%u", session_id);
     asio::post(io_context_, [this, session_id] {
+        if (active_session_id_ == session_id) return;
+
+        // Detach sinks from the previously active session so its decoded
+        // frames stop reaching platform sinks (audio/video). Required to
+        // avoid cross-stream output when two sessions are alive at once
+        // (e.g., USB + Wireless on different phones).
+        if (active_session_id_ != 0) {
+            auto prev = sessions_.find(active_session_id_);
+            if (prev != sessions_.end()) {
+                prev->second->detach_all_sinks();
+                AA_LOG_I("detached sinks: session=%u", active_session_id_);
+            }
+        }
+
         active_session_id_ = session_id;
-        // TODO: detach sinks from old active, attach to new active
+
+        // Attach sinks to the new active session so its frames start
+        // flowing to platform sinks. The opposite of the detach above —
+        // both must be paired in this single transition.
+        if (session_id != 0) {
+            auto next = sessions_.find(session_id);
+            if (next != sessions_.end()) {
+                next->second->attach_all_sinks();
+                AA_LOG_I("attached sinks: session=%u", session_id);
+            }
+        }
     });
 }
 
@@ -263,12 +287,6 @@ void Engine::register_services(
     }
 }
 
-void Engine::activate_session(uint32_t sid) {
-    if (active_session_id_ == 0) {
-        active_session_id_ = sid;
-    }
-}
-
 void Engine::report_start_session_failure(uint32_t sid, const std::string& detail) {
     if (!callback_) return;
 
@@ -304,14 +322,19 @@ void Engine::do_start_session(const std::string& descriptor, uint32_t sid) {
     register_services(session, std::move(peer_services), control_svc);
 
     sessions_[sid] = session;
-    activate_session(sid);
     session->start();
+    // Note: no auto-promotion to active. The app must explicitly call
+    // set_active_session() to make this session the sink-attached one.
+    // See F.17 in docs/architecture_review.md.
 }
 
 void Engine::cleanup_session(uint32_t session_id) {
     sessions_.erase(session_id);
     if (active_session_id_ == session_id) {
-        active_session_id_ = sessions_.empty() ? 0 : sessions_.begin()->first;
+        // Don't auto-promote another session. Sink attach state was
+        // bound to the removed session; selecting the next active is a
+        // policy decision for the app. See F.17.
+        active_session_id_ = 0;
     }
 }
 

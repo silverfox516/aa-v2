@@ -100,7 +100,6 @@ private:
         const std::shared_ptr<session::Session>& session,
         std::map<int32_t, std::shared_ptr<service::IService>> peer_services,
         const std::shared_ptr<service::ControlService>& control_service);
-    void activate_session(uint32_t sid);
     void report_start_session_failure(uint32_t sid, const std::string& detail);
     void do_start_session(const std::string& descriptor, uint32_t sid);
     void cleanup_session(uint32_t session_id);

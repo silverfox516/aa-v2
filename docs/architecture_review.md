@@ -581,3 +581,47 @@ Test seam이 디자인의 부산물이 아니라 핵심.
   - 같은 폰은 한 번에 하나의 AA 연결만 유지 (폰 동작)
   - 무선→유선: AOA 전환 시 폰이 무선 끊음 → USB timeout으로 대기
   - 유선→무선: onPhoneIdentified에서 같은 폰 감지 → USB 즉시 종료 (timeout 대기 없음)
+
+### F.17 Active session sink swap을 Engine이 책임 (2026-04-27)
+
+- **배경**: `Engine::set_active_session()`은 원래 `active_session_id_`만
+  업데이트하고 sink 재배치는 `// TODO: detach sinks from old active, attach
+  to new active` 주석으로 남아 있었음. 실제 sink swap은 app 측
+  `AaService.activateSession()`이 `attachAllSinks/detachAllSinks` AIDL을
+  순서대로 호출해 처리했다. 두 API가 같은 일을 따로 한다는 점에서
+  CLAUDE.md "no band-aid" 원칙 위반.
+
+- **대안**:
+  - (a) `Engine::set_active_session()`이 sink swap까지 책임지도록 완성
+  - (b) `Engine::set_active_session()`을 제거하고 swap 책임을 app에 일임
+  - (c) 현 상태 유지(API 두 벌, 한쪽은 stub)
+
+- **선택**: (a). `set_active_session(sid)`이 단일 트랜잭션으로
+  이전 active의 sink detach → `active_session_id_` 갱신 → 새 active의
+  sink attach를 모두 수행한다.
+
+- **근거**:
+  - "active session"은 core가 가진 명시적 상태(`active_session_id_`)이므로,
+    그 상태 전환의 부수 효과(sink 재배치)도 core가 갖는 게 자연스러움.
+  - app 측이 detach + attach를 따로 호출하는 패턴은 두 호출 사이의 race나
+    부분 실패가 가능. 단일 entry point가 atomic 트랜잭션을 보장.
+  - multi-session 시나리오(USB+Wireless 동시) 학습 가치가 본 프로젝트 목표
+    (Part 0)의 "이상적 구조 설계"와 직결.
+  - core가 platform-free인 점은 유지됨 (sink detach/attach는 이미 IService
+    포트로 추상화되어 있고, 본 작업은 core 안의 호출 그래프만 바꿈).
+
+- **영향**:
+  - app 측 `AaService.activateSession()`은 향후 `setActiveSession()` 단일
+    호출로 단순화 가능 (별도 작업 — F.17 결정의 직접 후속).
+  - 그 작업이 완료되면 AIDL의 `attachAllSinks`/`detachAllSinks`는 deprecated
+    가능. 단, 그 전까지는 두 경로가 공존(중복은 의식하고 받아들이는 임시
+    상태).
+  - 결정에 맞춰 두 곳의 암묵적 active 변경 경로를 함께 제거했다 —
+    "암묵적 magic 없음" 원칙:
+    - `do_start_session`의 첫 세션 자동 활성화 (`activate_session()` 함수
+      자체 삭제). 첫 세션이라도 app이 명시적으로 `set_active_session()`을
+      호출해야 sink가 붙는다.
+    - `cleanup_session`에서 active session 제거 시 임의의 다른 세션을
+      자동 승격하던 로직 (이제 단순히 `active_session_id_ = 0`). 어느
+      세션을 다음 active로 할지는 app 정책이며, 명시적 `set_active_session()`
+      호출이 필요하다.
