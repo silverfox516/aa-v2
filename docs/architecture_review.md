@@ -666,3 +666,144 @@ Test seam이 디자인의 부산물이 아니라 핵심.
   - 두 코디네이터는 이제 패턴이 동일하므로, 추가 transport(예: TCP-only
     custom 케이블 등)를 붙일 때 동일 모양으로 새 코디네이터만 만들면
     호스트 수정이 거의 없다 — 학습 결과의 직접적 활용 형태.
+
+---
+
+## Part G. Scoping Decisions (학습 우선순위 적용)
+
+> Part 0의 목표 중 "Stub vs 풀 구현은 학습 가치로 판단"의 적용 사례.
+> 어떤 부분을 stub/미구현으로 두기로 했는지, 그 결정의 근거가
+> 무엇인지 추적한다. 이 카탈로그가 있어야 "왜 이건 stub인가?"라는
+> 질문에 매번 답하지 않아도 된다.
+>
+> 형식: 항목 / 현재 상태 / 학습 가치 판단 / 풀 구현 시 얻는 추가 가치
+>      / 트리거 조건.
+
+### G.1 MediaBrowserService (channel 12)
+
+- **현재**: stub. ServiceDiscoveryResponse에 capability 등록만, 트리
+  노드 메시지(MEDIA_ROOT_NODE 등) 핸들러 없음.
+- **왜 stub인가**: 풀 구현은 "폰의 미디어 라이브러리 트리를 H/U UI로
+  브라우징"인데, 이건 UI 작업이지 AAP 분석 작업이 아니다. 학습 가치는
+  "phone이 우리 채널에 어떤 메시지를 어떤 순서로 보내는지" 관찰까지로
+  충분 (현재 stub이 unhandled 로그로 캡처 중).
+- **풀 구현 시 가치**: 미디어 트리 메시지 6종(GET_NODE/ROOT/SOURCE/LIST/
+  SONG/INPUT)의 실제 wire 형태와 페이지네이션 동작 학습.
+- **트리거**: H/U에 미디어 브라우저 UI를 본격 만들 일이 생기면.
+
+### G.2 BluetoothService (channel 13)
+
+- **현재**: stub. HU MAC + PIN_ENTRY 페어링 방식 advertise.
+  `HeadunitConfig.bluetooth_mac`는 placeholder("02:00:00:00:00:00").
+  실제 페어링 메시지(BluetoothPairingRequest 등) 핸들러 없음.
+- **왜 stub인가**: 진짜 페어링은 Android BT 스택(Bluedroid) 통합 작업
+  으로, AAP 학습이 아니라 Android BT API 학습. 무선 AA의 BT는
+  RFCOMM(별도 경로)이고 이건 BT HFP/A2DP 페어링 — 별 영역.
+- **풀 구현 시 가치**: AAP가 BT 스택과 어떻게 협력하는지 (HFP 핸즈프리,
+  A2DP 미디어 라우팅 협상). 단, A2DP_SINK 충돌 처리가 추가로 필요
+  (4.1 platform constraint 참고).
+- **트리거**: AAP-driven BT 페어링 워크플로우를 학습 대상으로 명시할 때.
+
+### G.3 VendorExtensionService (channel 14)
+
+- **현재**: stub. name="aa-v2-headunit"으로 advertise. 메시지 정의 없음.
+- **왜 stub인가**: vendor extension은 표준 동작이 정의되지 않은 자유 채널.
+  "정의된 동작을 구현"이 아니라 "우리만의 메시지를 만든다"가 본질이라
+  학습 가치가 일반화되지 않는다 (특정 OEM 기능을 만들고 싶을 때만 의미).
+- **풀 구현 시 가치**: 거의 없음 (학습 목표상). vendor message 정의/송수신
+  자체는 다른 서비스에서 이미 다 학습됨.
+- **트리거**: 특정 OEM(예: TCC) 고유 기능을 AA로 노출해야 할 사업 요구가
+  생기면. 학습 프로젝트로서는 close.
+
+### G.4 ISensorSource 플랫폼 구현
+
+- **현재**: 미구현. core `SensorService`는 service 핸들러로서 폰의 sensor
+  request에 응답(예: SensorStartResponse)은 하지만, 실제 GPS/IMU 데이터
+  공급원(`ISensorSource`) impl은 wire 안 됨.
+- **왜 stub인가**: GPS는 차량 GNSS HAL, IMU는 SoC 가속도계 등 H/W
+  의존성이 큼. 학습 가치는 "AAP sensor channel 동작 + 폰이 sensor
+  데이터를 어떻게 요청/소비"까지로 충분히 큼 (현재 응답 logic만으로
+  비디오 스트리밍 정상 동작 확인됨).
+- **풀 구현 시 가치**: 진짜 GPS 좌표 공급으로 navigation 채널과 결합한
+  실 동작 시나리오 학습. 차량 GNSS HAL 통합 패턴 학습.
+- **트리거**: navigation 채널 깊이 분석이 우선순위가 될 때, 또는 실제
+  주행 시나리오 검증이 필요할 때.
+
+### G.5 Hardening (Phase 6 — 0001 plan 항목별)
+
+#### G.5.1 6.1 Core unit test coverage ≥ 80%
+
+- **현재**: PARTIAL — core 테스트 43개 통과, 커버리지 % 측정 안 됨.
+- **판단**: 테스트가 학습 자료로서의 protocol 동작 captures 역할을 수행
+  중 (e.g., session_handshake_test, EncodeDecodeMultiFragmentRoundTrip,
+  SetActiveSessionSwapsSinks). 단순 % 채우기 보다 "어떤 동작을 코드로
+  documents하는지"가 더 중요한 단계.
+- **트리거**: 회귀가 잡히지 않는 영역 발견 시 그 영역 커버리지 추가.
+
+#### G.5.2 6.2 ASan/UBSan in test builds
+
+- **현재**: NOT STARTED.
+- **판단**: 학습 가치 ↑↑ — memory safety 이슈는 실기기 디버깅에서
+  reproduce 어려움. CI 환경에서 sanitizer로 잡으면 학습 자료
+  (troubleshooting.md)가 풍부해짐. 우선순위 높이기 권장.
+- **트리거**: 즉시. 비용 ≈ CMake 옵션 한 줄 + CI job 하나.
+
+#### G.5.3 6.3 Framer + crypto envelope fuzzing
+
+- **현재**: NOT STARTED.
+- **판단**: 학습 가치 △ — protocol 입력 도메인이 좁아서 (header 4바이트
+  + flag bits + payload bytes) random fuzz 가치가 제한적. 그러나
+  framer는 보안 경계이므로 정당한 투자.
+- **트리거**: ASan/UBSan(6.2) 정착 후. fuzzer는 sanitizer 없이는 가치 ↓.
+
+#### G.5.4 6.4 Connection error recovery
+
+- **현재**: PARTIAL. F.16의 same-phone transport switch 처리 + USB write
+  timeout 2초까지 됨. SSL handshake 중간 실패 후 재시도, transport
+  순간 끊김 후 graceful 복구 등은 미검증.
+- **판단**: 학습 가치 ↑ — 현실 차량 환경의 USB 케이블 흔들림, BT 일시
+  끊김 등은 모두 이 영역. 시나리오별 디버그 = 플랫폼 한계 학습.
+- **트리거**: P3-G(시나리오 러너) 도입 시 자연스럽게 함께.
+
+#### G.5.5 6.5 Multi-session (2 phones simultaneously)
+
+- **현재**: DONE. F.13 SessionManager로 multi-session OK. F.17 + F.18로
+  active session sink swap도 정리됨.
+- **추가 가치 없음** — close.
+
+#### G.5.6 6.6 Background audio (sink detach when AA not foreground)
+
+- **현재**: NOT VERIFIED. F.18로 sink detach API는 정리됐지만 "AA가
+  background 갔을 때 자동 detach" 트리거는 app 측에 wire 안 됨.
+- **판단**: 학습 가치 ○ — Android Activity lifecycle ↔ AAP focus 동기화
+  패턴 학습 가치 있음. 단, 실차에서 어떤 시나리오가 있는지 명확하지
+  않으므로 우선순위는 다음 라운드.
+- **트리거**: 차량 내 다른 앱과의 audio focus 충돌 시나리오가 학습 대상이
+  될 때.
+
+#### G.5.7 6.7 QuirksProfile framework (F.10)
+
+- **현재**: NOT STARTED. F.10에서 "원칙 채택"으로 결정됐지만 framework
+  코드 자체는 없음.
+- **판단**: 학습 가치 △ — 현재 검증된 폰이 1~2종이라 quirks가 아직
+  카탈로그화 가치가 적음. 폰 모델 5+종 검증 후 quirks가 누적되면 그때
+  framework화하는 게 자연스러움.
+- **트리거**: 검증 폰 5종 누적 또는 동일 phenomenon이 polymorphic
+  처리가 필요해질 때.
+
+#### G.5.8 6.8 Performance profiling (latency, CPU)
+
+- **현재**: NOT VERIFIED. troubleshooting.md #18에서 input latency
+  ~200-300ms 잔여 기록은 있으나 정량 측정/대시보드 없음.
+- **판단**: 학습 가치 ↑ — 어디서 시간이 걸리는지(transport / decode /
+  display) 분리 측정은 IPC 아키텍처(F.12) trade-off의 학습에 직결.
+- **트리거**: F.12 vs JNI 단일 프로세스 비교를 학습 대상으로 둘 때.
+
+### G.6 사용 권장
+
+- 새 stub/미구현 결정을 할 때마다 본 카탈로그에 G.x로 추가하라.
+  결정의 근거가 휘발되지 않게.
+- "왜 X는 풀 구현이 아닌가?" 질문이 두 번 이상 나오면 그 답이 본
+  카탈로그에 있는지 확인. 없으면 추가.
+- 카탈로그 항목이 "트리거" 조건에 도달하면 풀 구현 작업을 plans/
+  하위에 새 plan 파일(0005, 0006...)로 추가.
