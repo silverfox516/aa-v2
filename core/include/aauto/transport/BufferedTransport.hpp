@@ -78,11 +78,10 @@ private:
     void on_underlying_read(const std::error_code& ec,
                             std::vector<uint8_t> buf,
                             std::size_t bytes);
-    void deliver_pending_locked();
     void invoke_handler(ReadHandler handler,
                         std::error_code ec,
                         std::vector<uint8_t> data,
-                        std::size_t bytes);
+                        asio::mutable_buffer dest);
 
     std::shared_ptr<ITransport> underlying_;
     asio::any_io_executor       executor_;

@@ -34,7 +34,7 @@ void BufferedTransport::async_read(asio::mutable_buffer buffer,
     if (closed_) {
         lock.unlock();
         invoke_handler(std::move(handler),
-                       asio::error::operation_aborted, {}, 0);
+                       asio::error::operation_aborted, {}, buffer);
         return;
     }
 
@@ -43,7 +43,7 @@ void BufferedTransport::async_read(asio::mutable_buffer buffer,
         auto chunk = std::move(rx_queue_.front());
         rx_queue_.pop_front();
         lock.unlock();
-        invoke_handler(std::move(handler), {}, std::move(chunk), 0);
+        invoke_handler(std::move(handler), {}, std::move(chunk), buffer);
         return;
     }
 
@@ -53,7 +53,7 @@ void BufferedTransport::async_read(asio::mutable_buffer buffer,
         std::error_code ec = deferred_error_;
         deferred_error_ = std::error_code{};
         lock.unlock();
-        invoke_handler(std::move(handler), ec, {}, 0);
+        invoke_handler(std::move(handler), ec, {}, buffer);
         return;
     }
 
@@ -74,6 +74,8 @@ void BufferedTransport::close() {
     if (closed_) return;
     closed_ = true;
     ReadHandler pending = std::move(pending_handler_);
+    asio::mutable_buffer pending_dest = pending_dest_;
+    pending_dest_ = asio::mutable_buffer{};
     rx_queue_.clear();
     lock.unlock();
 
@@ -81,7 +83,7 @@ void BufferedTransport::close() {
 
     if (pending) {
         invoke_handler(std::move(pending),
-                       asio::error::operation_aborted, {}, 0);
+                       asio::error::operation_aborted, {}, pending_dest);
     }
 }
 
@@ -122,10 +124,12 @@ void BufferedTransport::on_underlying_read(const std::error_code& ec,
         std::unique_lock<std::mutex> lock(mu_);
         if (closed_) return;
         ReadHandler pending = std::move(pending_handler_);
+        asio::mutable_buffer pending_dest = pending_dest_;
+        pending_dest_ = asio::mutable_buffer{};
         if (pending) {
             // No queued data, no point storing the error — surface now.
             lock.unlock();
-            invoke_handler(std::move(pending), ec, {}, 0);
+            invoke_handler(std::move(pending), ec, {}, pending_dest);
             return;
         }
         // No pending caller — remember the error for the next async_read.
@@ -142,9 +146,11 @@ void BufferedTransport::on_underlying_read(const std::error_code& ec,
 
     if (pending_handler_) {
         ReadHandler h = std::move(pending_handler_);
+        asio::mutable_buffer dest = pending_dest_;
         pending_handler_ = nullptr;
+        pending_dest_ = asio::mutable_buffer{};
         lock.unlock();
-        invoke_handler(std::move(h), {}, std::move(buf), 0);
+        invoke_handler(std::move(h), {}, std::move(buf), dest);
     } else {
         // No waiting reader — buffer the chunk.
         if (rx_queue_.size() >= kMaxQueuedReads) {
@@ -165,18 +171,13 @@ void BufferedTransport::on_underlying_read(const std::error_code& ec,
 void BufferedTransport::invoke_handler(ReadHandler handler,
                                        std::error_code ec,
                                        std::vector<uint8_t> data,
-                                       std::size_t /*bytes*/) {
-    // Copy buffered chunk into the caller's destination buffer. We
-    // capture the dest snapshot under the lock in async_read; reading
-    // it here is safe because only one outstanding async_read is
-    // permitted by the ITransport contract.
+                                       asio::mutable_buffer dest) {
+    // Copy buffered chunk into the caller's destination buffer.
     std::size_t to_copy = 0;
     if (!ec && !data.empty()) {
-        // pending_dest_ stays set across the unlock window because
-        // ITransport guarantees one outstanding async_read at a time.
-        to_copy = std::min(asio::buffer_size(pending_dest_), data.size());
+        to_copy = std::min(asio::buffer_size(dest), data.size());
         if (to_copy > 0) {
-            std::memcpy(pending_dest_.data(), data.data(), to_copy);
+            std::memcpy(dest.data(), data.data(), to_copy);
         }
         if (to_copy < data.size()) {
             // Caller's buffer was too small. Push the remainder back so

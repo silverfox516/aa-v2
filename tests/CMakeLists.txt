@@ -25,6 +25,7 @@ add_executable(aauto_core_test
     core/outbound_message_encoder_test.cpp
     core/inbound_message_assembler_test.cpp
     core/handshake_coordinator_test.cpp
+    core/buffered_transport_test.cpp
 )
 
 target_include_directories(aauto_core_test PRIVATE
