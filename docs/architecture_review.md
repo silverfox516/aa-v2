@@ -625,3 +625,44 @@ Test seam이 디자인의 부산물이 아니라 핵심.
       자동 승격하던 로직 (이제 단순히 `active_session_id_ = 0`). 어느
       세션을 다음 active로 할지는 app 정책이며, 명시적 `set_active_session()`
       호출이 필요하다.
+
+### F.18 AaService 책임 분리 — transport-coordinator 패턴 (2026-04-27)
+
+- **배경**: `AaService`가 494줄에 `UsbMonitor.Listener` /
+  `WirelessSessionCoordinator.Callback` / `EngineConnectionManager.Callback`
+  세 콜백을 동시에 implement 하고, `usbSessionId` / `wirelessSessionId` /
+  `availableUsbDevice` 등 transport-aware한 사이드 상태를 직접 관리했다.
+  `SessionManager`가 transport-agnostic을 표방하면서도 transport별
+  세션 추적은 `AaService` 측 사이드 필드에 의존하는 모순이 있었다.
+
+- **대안**:
+  - (a) USB만 별도 코디네이터로 추출, wireless는 그대로
+  - (b) USB / wireless 둘 다 동일 패턴 코디네이터로 분리 (대칭)
+  - (c) 현 상태 유지 + `AaService` 안에서 의도 주석으로만 정리
+
+- **선택**: (b). USB와 wireless 모두 자기 transport의 세션 lifecycle을
+  스스로 소유하는 동일 패턴 코디네이터로 만들고, 둘이 호스트에 통보하는
+  창구는 단일 `SessionLifecycleListener`로 통합한다. transport→session_id
+  매핑은 `SessionManager.getSessionsByTransport()`로 호출자가 묻는다.
+
+- **근거**:
+  - 비대칭 설계는 학습 자료로서 가치가 떨어진다 — 두 transport가 같은
+    역할을 한다면 같은 모양이어야 한다 (Part 0 "이상적 구조").
+  - 사이드 상태는 cleanup 누수의 단골이다. `usbSessionId` / `wirelessSessionId`
+    필드처럼 "지운 자리에서만 -1로 되돌려놓는" 코드는 단일 source of
+    truth(`SessionManager`)로 합쳐야 누수가 원천 차단된다.
+  - 코디네이터가 자기 lifecycle을 끝까지 소유해야 (`engine.startSession` /
+    `startTcpSession`까지), 호스트가 transport-aware한 분기 if문을
+    누적할 자리가 사라진다.
+
+- **영향**:
+  - `AaService` 줄 수 494 → 413 (-81). implements 3 → 2.
+  - `EngineProxyProvider` 역할은 `Supplier<IAAEngine>`(`() -> engineProxy`)
+    람다로 충분하므로 별도 인터페이스는 만들지 않았다.
+  - 마지막 implements(`EngineConnectionManager.Callback`) 제거는 후속
+    작업: `Callback` 인터페이스를 `Consumer<IAAEngine>` + `Runnable`
+    한 쌍의 람다로 바꾸면 `AaService`는 `SessionLifecycleListener` 하나만
+    implements하는 상태가 된다 (≤1 목표).
+  - 두 코디네이터는 이제 패턴이 동일하므로, 추가 transport(예: TCP-only
+    custom 케이블 등)를 붙일 때 동일 모양으로 새 코디네이터만 만들면
+    호스트 수정이 거의 없다 — 학습 결과의 직접적 활용 형태.

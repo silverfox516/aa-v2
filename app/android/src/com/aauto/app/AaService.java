@@ -6,13 +6,11 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.hardware.usb.UsbDevice;
 import android.net.wifi.WifiManager;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
@@ -23,37 +21,32 @@ import com.aauto.engine.IAAEngineCallback;
 
 /**
  * Background service bridging the Android app with aa-engine daemon.
- * Manages USB and wireless AA connections via SessionManager.
  *
- * Session lifecycle:
- *   Transport connected → session created (CONNECTING)
- *   → AAP handshake → ServiceDiscovery → phone identified (CONNECTED)
- *   → user taps → VideoFocus(PROJECTED) (ACTIVE)
- *   → "exit" button → VideoFocus(NATIVE) (CONNECTED)
- *   → transport disconnected → session removed
+ * Responsibilities (kept minimal — see Part F.18 in architecture_review.md):
+ *   - Service lifecycle (onCreate/onDestroy/onBind)
+ *   - Hold engine proxy and route engine->app callbacks
+ *   - Own active-session policy (activate/setSurface/touch routing)
+ *   - Provide read API to UI (Activity)
+ *
+ * Transport-specific session lifecycle is owned by the transport
+ * coordinators ({@link UsbSessionCoordinator}, {@link WirelessSessionCoordinator}).
+ * Per-session bookkeeping lives in {@link SessionManager}, including the
+ * transport->session_id mapping previously held as side state here.
  */
 public class AaService extends Service
-        implements UsbMonitor.Listener,
-        WirelessSessionCoordinator.Callback,
-        EngineConnectionManager.Callback {
+        implements EngineConnectionManager.Callback, SessionLifecycleListener {
     private static final String TAG = "AA.Service";
     private static final int TCP_PORT = 5277;
 
-    private UsbMonitor usbMonitor;
     private volatile IAAEngine engineProxy;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final SessionManager sessionManager = new SessionManager();
 
-    // Track which session_id belongs to which transport event.
-    // NOT transport-type logic — just remembering "I created session X for USB"
-    // so that when USB detaches, I know to remove session X.
-    private int usbSessionId = -1;
-    private int wirelessSessionId = -1;
-
-    private UsbDevice availableUsbDevice;
     private BtProfileGate btProfileGate;
     private final WirelessStateTracker wirelessState = new WirelessStateTracker();
     private final HotspotConfigProvider hotspotConfigProvider = new HotspotConfigProvider();
+
+    private UsbSessionCoordinator usbCoordinator;
     private WirelessSessionCoordinator wirelessCoordinator;
     private EngineConnectionManager engineConnectionManager;
     private UiNavigationController uiNavigationController;
@@ -199,13 +192,15 @@ public class AaService extends Service
         engineConnectionManager = new EngineConnectionManager(
                 handler, engineCallback, this, 2000, 10);
         engineConnectionManager.connect();
-        usbMonitor = new UsbMonitor(this, this);
-        usbMonitor.start();
+
+        usbCoordinator = new UsbSessionCoordinator(
+                this, () -> engineProxy, sessionManager, this);
+        usbCoordinator.start();
 
         btProfileGate = new BtProfileGate(this);
         wirelessCoordinator = new WirelessSessionCoordinator(
-                this, wirelessState, hotspotConfigProvider,
-                btProfileGate, this);
+                this, wirelessState, hotspotConfigProvider, btProfileGate,
+                () -> engineProxy, sessionManager, this, TCP_PORT);
 
         registerReceiver(apStateReceiver,
                 new IntentFilter("android.net.wifi.WIFI_AP_STATE_CHANGED"));
@@ -219,7 +214,10 @@ public class AaService extends Service
         Log.i(TAG, "AaService destroying");
         handler.removeCallbacksAndMessages(null);
         playbackController.shutdown();
-        usbMonitor.stop();
+        if (usbCoordinator != null) {
+            usbCoordinator.shutdown();
+            usbCoordinator = null;
+        }
         if (wirelessCoordinator != null) {
             wirelessCoordinator.shutdown();
             wirelessCoordinator = null;
@@ -243,93 +241,16 @@ public class AaService extends Service
         return START_STICKY;
     }
 
-    // ===== UsbMonitor.Listener =====
+    // ===== SessionLifecycleListener (from coordinators) =====
 
     @Override
-    public void onDeviceAvailable(UsbDevice device) {
-        Log.i(TAG, "USB device available: " + device.getProductName());
-        availableUsbDevice = device;
-
-        // Auto-connect: open USB and start session immediately
-        if (!usbMonitor.connectPendingDevice()) {
-            Log.e(TAG, "failed to open USB device");
-            notifyDeviceStateChanged();
-            return;
-        }
-        // onDeviceReady will be called next
-    }
-
-    @Override
-    public void onDeviceReady(int fd, int epIn, int epOut) {
-        startUsbSession(fd, epIn, epOut);
-    }
-
-    private void startUsbSession(int fd, int epIn, int epOut) {
-        if (engineProxy == null) {
-            Log.e(TAG, "engine not connected, cannot start USB session");
-            return;
-        }
-        try {
-            ParcelFileDescriptor pfd = ParcelFileDescriptor.adoptFd(fd);
-            int sid = engineProxy.startSession(pfd, epIn, epOut);
-            if (sid > 0) {
-                usbSessionId = sid;
-                sessionManager.createSession(sid, "USB");
-                Log.i(TAG, "USB session started: id=" + sid);
-            }
-        } catch (RemoteException e) {
-            Log.e(TAG, "failed to start USB session", e);
-        }
-        notifyDeviceStateChanged();
-    }
-
-
-    @Override
-    public void onDeviceRemoved() {
-        Log.i(TAG, "USB device removed");
-        availableUsbDevice = null;
-        if (usbSessionId > 0) {
-            stopAndRemoveSession(usbSessionId);
-            usbSessionId = -1;
-        }
-        notifyDeviceStateChanged();
-    }
-
-    // ===== WirelessSessionCoordinator.Callback =====
-
-    @Override
-    public void onWirelessStateChanged() {
+    public void onTransportStateChanged() {
         notifyDeviceStateChanged();
     }
 
     @Override
-    public void onWirelessReadyToStartSession(String deviceId, String deviceName) {
-        Log.i(TAG, "wireless ready: " + deviceId + " (" + deviceName + ")");
-        if (engineProxy == null) {
-            Log.e(TAG, "engine not connected, cannot start wireless session");
-            return;
-        }
-        try {
-            int sid = engineProxy.startTcpSession(TCP_PORT);
-            if (sid > 0) {
-                wirelessSessionId = sid;
-                sessionManager.createSession(sid, "Wireless");
-                Log.i(TAG, "wireless session started: id=" + sid);
-            }
-        } catch (RemoteException e) {
-            Log.e(TAG, "failed to start wireless session", e);
-        }
-        notifyDeviceStateChanged();
-    }
-
-    @Override
-    public void onWirelessDisconnected(String deviceId, String reason) {
-        Log.i(TAG, "wireless disconnected: " + deviceId + " — " + reason);
-        if (wirelessSessionId > 0) {
-            stopAndRemoveSession(wirelessSessionId);
-            wirelessSessionId = -1;
-        }
-        notifyDeviceStateChanged();
+    public void onSessionShouldStop(int sessionId) {
+        stopAndRemoveSession(sessionId);
     }
 
     // ===== EngineConnectionManager.Callback =====
@@ -344,7 +265,7 @@ public class AaService extends Service
         engineProxy = null;
     }
 
-    // ===== Session management =====
+    // ===== Session cleanup helpers =====
 
     private void stopAndRemoveSession(int sessionId) {
         if (engineProxy != null) {
@@ -360,8 +281,6 @@ public class AaService extends Service
             playbackController.clearSessionPlayback();
             sendBroadcast(new Intent(ACTION_SESSION_ENDED));
         }
-        if (sessionId == usbSessionId) usbSessionId = -1;
-        if (sessionId == wirelessSessionId) wirelessSessionId = -1;
         notifyDeviceStateChanged();
     }
 
@@ -369,7 +288,7 @@ public class AaService extends Service
 
     private void startWirelessListeningIfReady() {
         if (wirelessCoordinator != null) {
-            wirelessCoordinator.startListeningIfReady(TCP_PORT);
+            wirelessCoordinator.startListeningIfReady();
         }
     }
 

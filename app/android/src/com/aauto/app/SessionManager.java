@@ -91,6 +91,24 @@ class SessionManager {
         return new ArrayList<>(sessions.values());
     }
 
+    /**
+     * Return all sessions whose {@code transportLabel} matches.
+     *
+     * Used by transport-specific coordinators to find their sessions
+     * for cleanup (e.g., USB removed -> stop all "USB" sessions). This
+     * keeps the transport->session mapping inside SessionManager rather
+     * than as side state on AaService.
+     */
+    synchronized List<SessionEntry> getSessionsByTransport(String transportLabel) {
+        List<SessionEntry> result = new ArrayList<>();
+        for (SessionEntry e : sessions.values()) {
+            if (transportLabel.equals(e.transportLabel)) {
+                result.add(e);
+            }
+        }
+        return result;
+    }
+
     synchronized boolean hasAnySession() {
         return !sessions.isEmpty();
     }
