@@ -32,9 +32,13 @@ import com.aauto.engine.IAAEngineCallback;
  * coordinators ({@link UsbSessionCoordinator}, {@link WirelessSessionCoordinator}).
  * Per-session bookkeeping lives in {@link SessionManager}, including the
  * transport->session_id mapping previously held as side state here.
+ *
+ * AaService implements exactly one callback interface
+ * ({@link SessionLifecycleListener}). Engine connection events
+ * are received as Consumer/Runnable lambdas passed into
+ * {@link EngineConnectionManager}.
  */
-public class AaService extends Service
-        implements EngineConnectionManager.Callback, SessionLifecycleListener {
+public class AaService extends Service implements SessionLifecycleListener {
     private static final String TAG = "AA.Service";
     private static final int TCP_PORT = 5277;
 
@@ -190,7 +194,10 @@ public class AaService extends Service
         Log.i(TAG, "AaService created");
         uiNavigationController = new UiNavigationController(this);
         engineConnectionManager = new EngineConnectionManager(
-                handler, engineCallback, this, 2000, 10);
+                handler, engineCallback,
+                engine -> engineProxy = engine,
+                () -> engineProxy = null,
+                2000, 10);
         engineConnectionManager.connect();
 
         usbCoordinator = new UsbSessionCoordinator(
@@ -251,18 +258,6 @@ public class AaService extends Service
     @Override
     public void onSessionShouldStop(int sessionId) {
         stopAndRemoveSession(sessionId);
-    }
-
-    // ===== EngineConnectionManager.Callback =====
-
-    @Override
-    public void onEngineConnected(IAAEngine engine) {
-        engineProxy = engine;
-    }
-
-    @Override
-    public void onEngineDisconnected() {
-        engineProxy = null;
     }
 
     // ===== Session cleanup helpers =====

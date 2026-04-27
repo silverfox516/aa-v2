@@ -8,17 +8,15 @@ import android.util.Log;
 import com.aauto.engine.IAAEngine;
 import com.aauto.engine.IAAEngineCallback;
 
+import java.util.function.Consumer;
+
 class EngineConnectionManager {
     private static final String TAG = "AA.EngineConn";
 
-    interface Callback {
-        void onEngineConnected(IAAEngine engine);
-        void onEngineDisconnected();
-    }
-
     private final Handler handler;
     private final IAAEngineCallback engineCallback;
-    private final Callback callback;
+    private final Consumer<IAAEngine> onConnected;
+    private final Runnable onDisconnected;
     private final int retryDelayMs;
     private final int maxRetries;
     private final Runnable connectRunnable = this::connect;
@@ -28,12 +26,14 @@ class EngineConnectionManager {
 
     EngineConnectionManager(Handler handler,
                             IAAEngineCallback engineCallback,
-                            Callback callback,
+                            Consumer<IAAEngine> onConnected,
+                            Runnable onDisconnected,
                             int retryDelayMs,
                             int maxRetries) {
         this.handler = handler;
         this.engineCallback = engineCallback;
-        this.callback = callback;
+        this.onConnected = onConnected;
+        this.onDisconnected = onDisconnected;
         this.retryDelayMs = retryDelayMs;
         this.maxRetries = maxRetries;
     }
@@ -57,11 +57,11 @@ class EngineConnectionManager {
             engineProxy.registerCallback(engineCallback);
             connectRetryCount = 0;
             Log.i(TAG, "connected to aa-engine");
-            callback.onEngineConnected(engineProxy);
+            onConnected.accept(engineProxy);
         } catch (RemoteException e) {
             Log.e(TAG, "registerCallback failed", e);
             engineProxy = null;
-            callback.onEngineDisconnected();
+            onDisconnected.run();
         }
     }
 
@@ -75,6 +75,6 @@ class EngineConnectionManager {
             }
         }
         engineProxy = null;
-        callback.onEngineDisconnected();
+        onDisconnected.run();
     }
 }
