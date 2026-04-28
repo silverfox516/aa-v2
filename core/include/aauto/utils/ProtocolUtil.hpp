@@ -48,14 +48,81 @@ inline const char* to_string(MediaMessageType t) {
     }
 }
 
-/// Format a message type as a readable string.
-/// Tries control types first, then media types, falls back to hex.
-/// Returns pointer to a thread-local buffer (valid until next call).
-inline const char* msg_type_name(uint16_t type) {
+/// Channel-specific message name tables. Each AAP channel defines its
+/// own message-id namespace; the same numeric id (e.g., 32769) means
+/// PLAYBACK_STATUS on media.playback (ch10), ROOT_NODE on media.browser
+/// (ch12), and MEDIA_START on video/audio (ch1~4). Looking up by id
+/// alone yields wrong labels for 10/12 — see CHANNEL_AWARE comment in
+/// msg_type_name below.
+
+inline const char* input_msg_name(uint16_t type) {
+    switch (type) {
+        case 32769: return "INPUT_REPORT";
+        case 32770: return "KEY_BINDING_REQ";
+        case 32771: return "KEY_BINDING_RESP";
+        case 32772: return "INPUT_FEEDBACK";
+        default:    return nullptr;
+    }
+}
+
+inline const char* mediaplayback_msg_name(uint16_t type) {
+    switch (type) {
+        case 32769: return "PLAYBACK_STATUS";
+        case 32770: return "PLAYBACK_INPUT";
+        case 32771: return "PLAYBACK_METADATA";
+        default:    return nullptr;
+    }
+}
+
+inline const char* mediabrowser_msg_name(uint16_t type) {
+    switch (type) {
+        case 32769: return "ROOT_NODE";
+        case 32770: return "SOURCE_NODE";
+        case 32771: return "LIST_NODE";
+        case 32772: return "SONG_NODE";
+        case 32773: return "GET_NODE";
+        case 32774: return "BROWSE_INPUT";
+        default:    return nullptr;
+    }
+}
+
+/// Format a message type as a readable string for the given channel.
+///
+/// CHANNEL_AWARE: AAP message ids are scoped per channel. Control-channel
+/// ids (CHANNEL_OPEN_REQ etc.) are valid on every channel and matched
+/// first. After that, channels with their own id namespace
+/// (input ch5, media.playback ch10, media.browser ch12) are looked up in
+/// dedicated tables — for the remaining channels we fall back to the
+/// generic MediaMessageType set used by video/audio/sensor/microphone.
+///
+/// Returns pointer to a thread-local buffer (valid until next call on
+/// the same thread).
+inline const char* msg_type_name(uint8_t channel, uint16_t type) {
     auto ct = to_string(static_cast<ControlMessageType>(type));
     if (ct) return ct;
-    auto mt = to_string(static_cast<MediaMessageType>(type));
-    if (mt) return mt;
+
+    switch (channel) {
+        case 5: {
+            auto n = input_msg_name(type);
+            if (n) return n;
+            break;
+        }
+        case 10: {
+            auto n = mediaplayback_msg_name(type);
+            if (n) return n;
+            break;
+        }
+        case 12: {
+            auto n = mediabrowser_msg_name(type);
+            if (n) return n;
+            break;
+        }
+        default: {
+            auto mt = to_string(static_cast<MediaMessageType>(type));
+            if (mt) return mt;
+            break;
+        }
+    }
 
     static thread_local char buf[16];
     snprintf(buf, sizeof(buf), "0x%04x", type);

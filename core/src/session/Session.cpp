@@ -166,7 +166,8 @@ void Session::send_message(uint8_t channel_id, uint16_t message_type,
             && message_type != static_cast<uint16_t>(MediaMessageType::Data)
             && !is_input_report) {
         AA_LOG_D("[AAP TX] %-18s %-24s %zu bytes",
-                 channel_name(channel_id), msg_type_name(message_type),
+                 channel_name(channel_id),
+                 msg_type_name(channel_id, message_type),
                  payload.size());
     }
     outbound_encoder_.send_message(channel_id, message_type, payload);
@@ -265,7 +266,9 @@ bool Session::handle_handshake_message(uint16_t msg_type,
             handshake_coordinator_.on_ssl_data_received(payload.data(), payload.size());
             return true;
         default:
-            AA_LOG_W("unexpected %s during handshake", msg_type_name(msg_type));
+            // Handshake runs on the control channel only.
+            AA_LOG_W("unexpected %s during handshake",
+                     msg_type_name(/*channel=*/0, msg_type));
             return true;
     }
 }
@@ -282,7 +285,8 @@ void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
             && msg_type != static_cast<uint16_t>(ControlMessageType::PingRequest)
             && msg_type != static_cast<uint16_t>(ControlMessageType::PingResponse)) {
         AA_LOG_D("[AAP RX] %-18s %-24s %zu bytes",
-                 channel_name(channel_id), msg_type_name(msg_type),
+                 channel_name(channel_id),
+                 msg_type_name(channel_id, msg_type),
                  payload.size());
     }
 
@@ -299,7 +303,7 @@ void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
         it->second->on_message(msg_type, payload.data(), payload.size());
     } else {
         AA_LOG_W("no service for [%s] %s", channel_name(channel_id),
-                 msg_type_name(msg_type));
+                 msg_type_name(channel_id, msg_type));
     }
 }
 

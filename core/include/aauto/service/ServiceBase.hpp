@@ -50,7 +50,7 @@ public:
                               "AA.ServiceBase",
                               "%-18s %-24s unhandled (%zu bytes)",
                               channel_name(channel_id_),
-                              msg_type_name(message_type),
+                              msg_type_name(channel_id_, message_type),
                               payload_size);
         }
     }
