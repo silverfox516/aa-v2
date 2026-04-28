@@ -273,19 +273,23 @@ HU는 unhandled 로그만.
 
 ---
 
-## Media Browser (ch 12 — stub advertise)
+## Media Browser (ch 12 — ON HOLD, phone refuses to open)
 
 | ID | Message | Direction | Phase | Trigger | Role | Status | Verified |
 |----|---------|-----------|-------|---------|------|--------|----------|
-| 32769 | ROOT_NODE | Phone → HU | runtime | after GET_NODE(root) | 미디어 브라우저 루트 노드 | ⬜ 미구현 | |
-| 32770 | SOURCE_NODE | Phone → HU | runtime | after GET_NODE(source) | 미디어 소스 목록 | ⬜ 미구현 | |
-| 32771 | LIST_NODE | Phone → HU | runtime | after GET_NODE(list) | 폴더/재생목록 | ⬜ 미구현 | |
-| 32772 | SONG_NODE | Phone → HU | runtime | after GET_NODE(song) | 개별 곡 정보 | ⬜ 미구현 | |
-| 32773 | GET_NODE | HU → Phone | runtime | user browses | 노드 탐색 요청 | ⬜ 미구현 | |
-| 32774 | BROWSE_INPUT | HU → Phone | runtime | search input | 브라우징 입력 | ⬜ 미구현 | |
+| 32769 | ROOT_NODE | Phone → HU | runtime | after GET_NODE(root) | 미디어 브라우저 루트 노드 | ⬜ 미관찰 (폰이 채널 안 엶) | |
+| 32770 | SOURCE_NODE | Phone → HU | runtime | after GET_NODE(source) | 미디어 소스 목록 | ⬜ 미관찰 | |
+| 32771 | LIST_NODE | Phone → HU | runtime | after GET_NODE(list) | 폴더/재생목록 | ⬜ 미관찰 | |
+| 32772 | SONG_NODE | Phone → HU | runtime | after GET_NODE(song) | 개별 곡 정보 | ⬜ 미관찰 | |
+| 32773 | GET_NODE | HU → Phone | runtime | user browses | 노드 탐색 요청 | ⬜ 송신 시도 안 됨 (채널 안 열림) | |
+| 32774 | BROWSE_INPUT | HU → Phone | runtime | search input | 브라우징 입력 | ⬜ 송신 시도 안 됨 | |
 
-채널은 advertise 됨 (G.1). 폰이 우리가 GET_NODE를 안 보내므로 응답
-메시지 미관찰.
+2026-04-28 Day 1 시도: 4개 핸들러 + auto-request hook + advertise 모두
+구현. 폰(Nothing A001 / SM-N981N)이 SERVICE_DISCOVERY_RESPONSE 받고도
+ch12 CHANNEL_OPEN_REQ를 송신하지 않음. YT Music + 다른 미디어 앱
+모두 동일. ch12만 폰이 열지 않는 유일한 채널 (ch1~7, ch10은 정상).
+Service code는 트리에 유지 (재시도 시 재사용). 자세한 시도 + 가설 +
+재시도 트리거: docs/plans/0005_media_browser.md, architecture_review.md G.1.
 
 ---
 

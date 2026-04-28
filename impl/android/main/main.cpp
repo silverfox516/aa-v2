@@ -240,6 +240,12 @@ public:
         // with real response handlers when each channel becomes a
         // learning target. See architecture_review.md G.0 for the
         // policy and G.1 / G.2 / G.3 / G.3a for per-channel reasons.
+        //
+        // MediaBrowser (ch12) note: Day 1 attempted 2026-04-28 with full
+        // handler set + auto-request hook. Phone refused to open the
+        // channel (verified across multiple apps incl. YT Music; other
+        // apps tested by user). On hold — see 0005 plan / G.1 for
+        // findings. Service code stays in tree as future starting point.
 
         return services;
     }
