@@ -34,7 +34,10 @@ public:
                                      const std::string& instance_id) = 0;
 
     /// Compressed video data (H.264 NALUs) for app-side decoding.
-    virtual void on_video_data(uint32_t session_id,
+    /// channel identifies the originating sink (1 = main display,
+    /// 15 = cluster display, etc. — see VideoService instances
+    /// registered in the IServiceFactory).
+    virtual void on_video_data(uint32_t session_id, int32_t channel,
                                const uint8_t* data, std::size_t size,
                                int64_t timestamp_us, bool is_config) = 0;
 

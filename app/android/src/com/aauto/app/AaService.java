@@ -163,9 +163,14 @@ public class AaService extends Service implements SessionLifecycleListener {
         }
 
         @Override
-        public void onVideoData(int sessionId, byte[] data, long timestampUs,
-                                boolean isConfig) {
-            playbackController.onVideoData(data, timestampUs, isConfig);
+        public void onVideoData(int sessionId, int channel, byte[] data,
+                                long timestampUs, boolean isConfig) {
+            // Day 1: only the main video channel (1) is wired through
+            // to the decoder. Cluster (channel 15) frames are dropped
+            // here until Day 3 adds the cluster decoder + TextureView.
+            if (channel == 1) {
+                playbackController.onVideoData(data, timestampUs, isConfig);
+            }
         }
 
         @Override

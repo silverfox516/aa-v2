@@ -157,7 +157,8 @@ public:
     }
 
     void on_phone_identified(uint32_t, const std::string&, const std::string&) override {}
-    void on_video_data(uint32_t, const uint8_t*, std::size_t, int64_t, bool) override {}
+    void on_video_data(uint32_t, int32_t, const uint8_t*, std::size_t,
+                       int64_t, bool) override {}
     void on_audio_data(uint32_t, uint32_t, const uint8_t*, std::size_t, int64_t) override {}
     void on_video_focus_changed(uint32_t, bool) override {}
 

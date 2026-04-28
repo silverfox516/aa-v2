@@ -7,6 +7,7 @@
 
 #include <aap_protobuf/service/Service.pb.h>
 #include <aap_protobuf/service/media/sink/MediaSinkService.pb.h>
+#include <aap_protobuf/service/media/sink/message/DisplayType.pb.h>
 #include <aap_protobuf/service/media/shared/message/MediaCodecType.pb.h>
 #include <aap_protobuf/service/media/shared/message/Setup.pb.h>
 #include <aap_protobuf/service/media/shared/message/Config.pb.h>
@@ -248,6 +249,15 @@ void VideoService::fill_config(
     vc->set_density(video_config_.density);
     vc->set_width_margin(0);
     vc->set_height_margin(0);
+
+    // Display type drives phone-side content routing — MAIN gets the
+    // full AA UI, CLUSTER gets glanceable cards. proto2 default is
+    // MAIN if unset; we always set it explicitly for clarity and so
+    // both MAIN and CLUSTER instances of VideoService produce
+    // self-describing ServiceDiscoveryResponse rows.
+    sink->set_display_type(static_cast<
+        aap_protobuf::service::media::sink::message::DisplayType>(
+            static_cast<int32_t>(video_config_.display_type)));
 }
 
 } // namespace aauto::service

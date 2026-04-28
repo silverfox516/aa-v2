@@ -125,7 +125,7 @@ public:
 
 class AndroidServiceFactory : public engine::IServiceFactory {
 public:
-    using VideoDataCb = std::function<void(uint32_t session_id,
+    using VideoDataCb = std::function<void(uint32_t session_id, int32_t channel,
         const uint8_t* data, std::size_t size, int64_t ts, bool is_config)>;
     using AudioDataCb = std::function<void(uint32_t session_id,
         uint32_t stream_type, const uint8_t* data, std::size_t size, int64_t ts)>;
@@ -154,14 +154,19 @@ public:
     create_services(service::SendMessageFn send_fn) override {
         std::map<int32_t, std::shared_ptr<service::IService>> services;
 
-        // Channel 1: Video — forward H.264 NALUs to app via AIDL callback
+        // Channel 1: Video — forward H.264 NALUs to app via AIDL callback.
+        // Display type is set explicitly to MAIN here (proto default is
+        // also MAIN, but stating it makes the "second VideoService for
+        // CLUSTER" pattern obvious).
+        constexpr int32_t kVideoMainChannel = 1;
         service::VideoServiceConfig vcfg{
-            hu_.video_width, hu_.video_height, hu_.video_fps, hu_.video_density};
+            hu_.video_width, hu_.video_height, hu_.video_fps, hu_.video_density,
+            service::VideoDisplayType::Main};
         uint32_t sid = current_session_id_;
         auto video_sink = std::make_shared<sink::CallbackVideoSink>(
-            [this, sid](const uint8_t* data, std::size_t size,
-                   int64_t ts, bool is_config) {
-                if (video_cb_) video_cb_(sid, data, size, ts, is_config);
+            [this, sid, ch = kVideoMainChannel](const uint8_t* data,
+                   std::size_t size, int64_t ts, bool is_config) {
+                if (video_cb_) video_cb_(sid, ch, data, size, ts, is_config);
             });
         std::vector<std::shared_ptr<sink::IVideoSink>> video_sinks;
         video_sinks.push_back(video_sink);
@@ -171,7 +176,7 @@ public:
             [this, sid](bool projected) {
                 if (focus_cb_) focus_cb_(sid, projected);
             });
-        services[1] = video_svc;
+        services[kVideoMainChannel] = video_svc;
 
         // Channel 2-4: Audio — forward PCM to app via callback
         auto make_audio = [&](int ch, sink::AudioStreamType st,
@@ -298,9 +303,9 @@ int main(int /*argc*/, char* /*argv*/[]) {
     auto service_factory = std::make_shared<AndroidServiceFactory>(
         hu_config,
         // Video callback
-        [&aidl_raw](uint32_t sid, const uint8_t* data, std::size_t size,
-                    int64_t ts, bool is_config) {
-            if (aidl_raw) aidl_raw->on_video_data(sid, data, size, ts, is_config);
+        [&aidl_raw](uint32_t sid, int32_t ch, const uint8_t* data,
+                    std::size_t size, int64_t ts, bool is_config) {
+            if (aidl_raw) aidl_raw->on_video_data(sid, ch, data, size, ts, is_config);
         },
         // Audio callback
         [&aidl_raw](uint32_t sid, uint32_t stream_type,

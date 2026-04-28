@@ -13,11 +13,23 @@ namespace aauto::service {
 ///
 /// Flow: SETUP -> CONFIG -> START -> [CODEC_CONFIG] -> DATA* -> STOP
 /// Flow control: phone sends max_unacked in CONFIG. HU sends ACK after N frames.
+/// Identifies which physical display this video sink represents.
+/// Maps directly to the AAP MediaSinkService.display_type enum
+/// (MAIN=0, CLUSTER=1, AUXILIARY=2). Phone routes content per type:
+/// MAIN gets the full Android Auto UI, CLUSTER gets glanceable
+/// turn-by-turn / now-playing cards.
+enum class VideoDisplayType : int32_t {
+    Main      = 0,
+    Cluster   = 1,
+    Auxiliary = 2,
+};
+
 struct VideoServiceConfig {
     uint32_t width   = 800;
     uint32_t height  = 480;
     uint32_t fps     = 30;
     uint32_t density = 160;
+    VideoDisplayType display_type = VideoDisplayType::Main;
 };
 
 class VideoService : public ServiceBase {

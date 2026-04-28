@@ -230,14 +230,14 @@ void AidlEngineController::on_phone_identified(
 // without waiting for the app to process, so this does not block the strand.
 
 void AidlEngineController::on_video_data(
-        uint32_t session_id,
+        uint32_t session_id, int32_t channel,
         const uint8_t* data, std::size_t size,
         int64_t timestamp_us, bool is_config) {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     if (callback_ == nullptr) return;
     std::vector<uint8_t> vec(data, data + size);
     callback_->onVideoData(
-        static_cast<int32_t>(session_id), vec,
+        static_cast<int32_t>(session_id), channel, vec,
         timestamp_us, is_config);
 }
 

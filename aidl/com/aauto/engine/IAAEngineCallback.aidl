@@ -18,10 +18,13 @@ interface IAAEngineCallback {
     /**
      * Video data from phone (compressed H.264 NALUs).
      * App decodes via MediaCodec and renders to Surface.
+     * @param channel originating video sink channel (1 = main display,
+     *                15 = cluster display, etc.). The app routes the
+     *                data to the corresponding decoder/Surface.
      * @param isConfig true for codec config (SPS/PPS), false for frame data.
      */
-    oneway void onVideoData(int sessionId, in byte[] data, long timestampUs,
-                            boolean isConfig);
+    oneway void onVideoData(int sessionId, int channel, in byte[] data,
+                            long timestampUs, boolean isConfig);
 
     /**
      * Audio data from phone (PCM samples).
