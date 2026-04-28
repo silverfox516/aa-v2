@@ -228,8 +228,7 @@ CHANNEL_OPEN: ch=1 (video)
 | ID | Message | Direction | Phase | Trigger | Role | Status | Verified |
 |----|---------|-----------|-------|---------|------|--------|----------|
 | 32769 | PLAYBACK_STATUS | Phone → HU | runtime | 1초 간격 / state 전이 시 | 재생 상태 (state, media_source, playback_seconds, shuffle, repeat) | ✅ passive handler (parse + log) | SM-N981N (PAUSED/PLAYING 전이 + pos 1초 단위 증가 관찰) |
-| 32770 | PLAYBACK_INPUT | HU → Phone | runtime | media key / steering wheel | 재생 제어 (play/pause/skip/seek) | ⬜ 미구현 | |
-| 32770 | PLAYBACK_INPUT | HU → Phone | runtime | media key / steering wheel | 재생 제어 (play/pause/skip/seek) | ✅ KEYCODE_MEDIA_{PLAY,PAUSE,PLAY_PAUSE,NEXT,PREVIOUS} via Input ch | SM-N981N (Spotify/YT Music 응답) |
+| 32770 | PLAYBACK_INPUT | HU → Phone | runtime | media key / steering wheel | 재생 제어 (play/pause/skip/seek) | ⬜ 미구현 + proto 미import (ID enum만 존재, message 정의 .proto 없음 — F.20에 따라 Input ch + KEYCODE 경로로 대체) | |
 | 32771 | PLAYBACK_METADATA | Phone → HU | runtime | 곡 변경 / 재생 시작 시 | 메타데이터 (song, artist, album, album_art bytes, playlist, duration, rating) | ✅ passive handler (parse + log + UI) | SM-N981N (한국어 곡명 UTF-8 통과; album_art 3KB~90KB 변동; playlist는 소스 앱이 제공할 때만 채움 — Spotify는 채우고 YT Music은 보통 빈 문자열) |
 
 ### MediaPlaybackStatus 필드

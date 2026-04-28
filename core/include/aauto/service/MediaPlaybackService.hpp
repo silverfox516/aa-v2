@@ -16,9 +16,11 @@ namespace aauto::service {
 ///   - MEDIA_PLAYBACK_STATUS (32769): play/pause/stop, source, position
 ///   - MEDIA_PLAYBACK_METADATA (32771): song, artist, album, album art
 ///
-/// Outbound MEDIA_PLAYBACK_INPUT (32770) — HU-side playback control —
-/// is not implemented yet. Wire it up when there's a place in the UI
-/// to drive it (steering wheel media keys, on-screen controls).
+/// Outbound MEDIA_PLAYBACK_INPUT (32770) is intentionally NOT
+/// implemented here. Per F.20, HU-side playback control (UI buttons,
+/// steering-wheel media keys) is sent via the Input channel using
+/// KEYCODE_MEDIA_* — broader phone-side compatibility than the
+/// playback-service proto. See InputService::send_media_key.
 ///
 /// Behavior is parse + invoke-callback. The callback recipients (set
 /// via `set_status_callback` / `set_metadata_callback`) are responsible
