@@ -48,6 +48,14 @@ session ~1 s later. Distinguishing display_id / display_type does
 not unblock it. Same outcome as MediaBrowser ch12 (G.1) — silent
 phone-side reject of an unfamiliar advertisement.
 
+**Single-sink CLUSTER experiment (2026-04-28)**: As a follow-up,
+changed the *only* registered VideoService (ch1) from Main to Cluster
+— same outcome (phone refuses, never opens any channel). Confirms
+that the phone's AAP host requires at least one MAIN display sink to
+proceed; CLUSTER-only or AUXILIARY-only SDR is rejected. This is
+useful protocol knowledge: cluster sinks are strictly *additive* on
+top of a MAIN sink, never a replacement.
+
 **Hypotheses for the refusal (unverified)**:
 
 1. **HeadunitInfo gating** — phone-side AAP may whitelist only
