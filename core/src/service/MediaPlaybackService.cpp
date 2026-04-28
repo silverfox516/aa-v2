@@ -38,15 +38,33 @@ MediaPlaybackService::MediaPlaybackService(SendMessageFn send_fn)
                          "media.playback", "PLAYBACK_STATUS", size);
                 return;
             }
-            AA_LOG_I("%-18s %-24s state=%s source=\"%s\" pos=%us"
-                     " shuffle=%d repeat=%d repeat_one=%d",
-                     "media.playback", "PLAYBACK_STATUS",
-                     state_name(msg.state()),
-                     msg.media_source().c_str(),
-                     msg.playback_seconds(),
-                     msg.shuffle()    ? 1 : 0,
-                     msg.repeat()     ? 1 : 0,
-                     msg.repeat_one() ? 1 : 0);
+            // Suppress 1Hz heartbeat: log only when something other
+            // than playback_seconds changes. UI callback still fires
+            // every tick so the progress bar stays smooth.
+            int32_t state_int = static_cast<int32_t>(msg.state());
+            bool changed = !last_status_seen_
+                || state_int                != last_status_state_
+                || msg.media_source()       != last_status_source_
+                || msg.shuffle()            != last_status_shuffle_
+                || msg.repeat()             != last_status_repeat_
+                || msg.repeat_one()         != last_status_repeat_one_;
+            if (changed) {
+                AA_LOG_I("%-18s %-24s state=%s source=\"%s\" pos=%us"
+                         " shuffle=%d repeat=%d repeat_one=%d",
+                         "media.playback", "PLAYBACK_STATUS",
+                         state_name(msg.state()),
+                         msg.media_source().c_str(),
+                         msg.playback_seconds(),
+                         msg.shuffle()    ? 1 : 0,
+                         msg.repeat()     ? 1 : 0,
+                         msg.repeat_one() ? 1 : 0);
+                last_status_seen_       = true;
+                last_status_state_      = state_int;
+                last_status_source_     = msg.media_source();
+                last_status_shuffle_    = msg.shuffle();
+                last_status_repeat_     = msg.repeat();
+                last_status_repeat_one_ = msg.repeat_one();
+            }
             if (status_cb_) {
                 status_cb_(static_cast<int32_t>(msg.state()),
                            msg.media_source(),

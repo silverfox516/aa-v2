@@ -65,6 +65,18 @@ public:
 private:
     StatusCallback   status_cb_;
     MetadataCallback metadata_cb_;
+
+    // Last-logged PLAYBACK_STATUS values. The phone sends STATUS at
+    // ~1 Hz with only playback_seconds incrementing — this is heartbeat
+    // noise. We log only when something other than position changes
+    // (state, source, mode flags). Callbacks always fire regardless so
+    // the UI keeps ticking the playhead.
+    bool        last_status_seen_      = false;
+    int32_t     last_status_state_     = -1;
+    std::string last_status_source_;
+    bool        last_status_shuffle_   = false;
+    bool        last_status_repeat_    = false;
+    bool        last_status_repeat_one_= false;
 };
 
 } // namespace aauto::service

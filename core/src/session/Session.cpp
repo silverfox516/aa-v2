@@ -280,10 +280,19 @@ bool Session::is_handshake_state() const {
 
 void Session::dispatch_decrypted(uint8_t channel_id, uint16_t msg_type,
                                  std::vector<uint8_t> payload) {
-    // Suppress noisy per-message logs (media data, ping)
+    // Suppress noisy per-message logs:
+    //   - media DATA frames (audio/video at every packet)
+    //   - PING request/response (heartbeat on control channel)
+    //   - PLAYBACK_STATUS on media.playback ch10 (1Hz heartbeat — phone
+    //     resends every second, only playback_seconds increments;
+    //     MediaPlaybackService logs it at INFO level only on transitions)
+    bool is_playback_status =
+        channel_id == 10
+        && msg_type == 32769;  // MediaPlaybackStatusMessageId::MEDIA_PLAYBACK_STATUS
     if (msg_type != static_cast<uint16_t>(MediaMessageType::Data)
             && msg_type != static_cast<uint16_t>(ControlMessageType::PingRequest)
-            && msg_type != static_cast<uint16_t>(ControlMessageType::PingResponse)) {
+            && msg_type != static_cast<uint16_t>(ControlMessageType::PingResponse)
+            && !is_playback_status) {
         AA_LOG_D("[AAP RX] %-18s %-24s %zu bytes",
                  channel_name(channel_id),
                  msg_type_name(channel_id, msg_type),
