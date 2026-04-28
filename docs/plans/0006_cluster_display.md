@@ -1,9 +1,82 @@
 # 0006 — Cluster display (PIP overlay)
 
 > Created: 2026-04-28
-> Status: PLANNING
+> Status: **ON HOLD (2026-04-28, Day 2)** — phone (SM-N981N over
+> wireless) refuses any SDR with a second media_sink_service entry,
+> regardless of display_type / display_id values. Day 1 plumbing
+> kept in tree as a re-attempt starting point. See "Day 2 outcome"
+> below.
 > Related decisions: F.20 (재생 명령 채널 분리), G.0 (passive handler rule),
-> 0004 (multi-session pattern 참고)
+> 0004 (multi-session pattern 참고), G.1 (MediaBrowser refusal — same
+> pattern, phone silently rejects)
+
+## Day 2 outcome (2026-04-28)
+
+Day 1 (commit 3f457b3) shipped the API plumbing — VideoServiceConfig
+gained display_type + display_id fields, IEngineCallback / AIDL
+onVideoData gained a channel parameter, AaService routes channel==1
+through to the decoder. Main video continued to work.
+
+Day 2 added `services[15] = VideoService(15, CLUSTER, 480x270@20)` in
+main.cpp and observed the result on real device.
+
+**Result**: phone refuses the SDR. Three iterations:
+
+1. **First attempt** (cluster sink, no explicit display_id):
+   - SDR grew from 229 bytes to 247 bytes (cluster sink added)
+   - Phone never sends CHANNEL_OPEN_REQ for any channel
+   - HU surface ready -> set_video_focus broadcast to all
+     VideoServices (with the bug we hadn't seen yet)
+   - Cluster's set_video_focus sent VIDEO_FOCUS_NOTIF on ch15
+     (a channel the phone hadn't opened) -> phone immediately
+     drops TCP
+
+2. **After fixing set_video_focus to skip non-Main display_type**:
+   - SDR same 247 bytes
+   - Phone STILL never sends CHANNEL_OPEN_REQ
+   - HU sends VIDEO_FOCUS_NOTIF on ch1 (main, expected)
+   - Phone drops TCP ~12 ms later
+
+3. **After adding explicit distinct display_id (main=0, cluster=1)**:
+   - SDR grew to 251 bytes (+4 bytes for the second display_id)
+   - Phone STILL never sends CHANNEL_OPEN_REQ
+   - Phone drops TCP ~7 ms after VIDEO_FOCUS_NOTIF
+
+The pattern is consistent: the phone receives the SDR with a second
+media_sink_service entry, never opens any channel, and aborts the
+session ~1 s later. Distinguishing display_id / display_type does
+not unblock it. Same outcome as MediaBrowser ch12 (G.1) — silent
+phone-side reject of an unfamiliar advertisement.
+
+**Hypotheses for the refusal (unverified)**:
+
+1. **HeadunitInfo gating** — phone-side AAP may whitelist only
+   car-certified make/model when accepting non-MAIN sinks. Our HU
+   doesn't claim to be a real cluster-equipped car.
+2. **Source app gating** — Spotify / YT Music are general-purpose
+   media apps. They don't contribute cluster content to a generic
+   HU even if AAP itself accepts the SDR. Combined with #1 the
+   phone sees no point in opening the cluster channel.
+3. **AAP version / template** — modern AAP may require a complete
+   "automotive HU" SDR template (audio sink + video sink + nav +
+   sensor + ...) before treating cluster as legitimate.
+
+**Re-attempt triggers**:
+- HeadunitInfo customization with realistic make/model
+- Test with another phone model (Pixel etc.)
+- Reference implementation comparison: openauto / aasdk SDR for
+  cluster — what fields do they set?
+- Real cluster-display car for ground-truth observation
+
+**State of the code (2026-04-28)**:
+- main.cpp does NOT register services[15]; cluster sink not advertised
+- VideoService keeps display_type and display_id fields and emits
+  them in fill_config — safe for main display (default values match
+  proto2 defaults), useful entry point for re-attempt
+- AIDL onVideoData(channel, ...) signature change from Day 1 stays —
+  worth keeping for any future per-channel routing
+- set_video_focus is gated on display_type == Main (only relevant
+  if we ever do register a non-Main video service again)
 
 ## Goal
 

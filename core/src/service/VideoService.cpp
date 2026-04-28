@@ -94,7 +94,8 @@ VideoService::VideoService(SendMessageFn send_fn,
 
 void VideoService::on_channel_open(uint8_t channel_id) {
     ServiceBase::on_channel_open(channel_id);
-    AA_LOG_I("%-18s %-24s ch=%u", "video", "CHANNEL_OPEN", channel_id);
+    AA_LOG_I("%-18s %-24s ch=%u", channel_name(channel_id_),
+             "CHANNEL_OPEN", channel_id);
 }
 
 void VideoService::set_native_window(void* window) {
@@ -111,8 +112,8 @@ void VideoService::on_channel_close() {
         }
         started_ = false;
     }
+    AA_LOG_I("%-18s %-24s", channel_name(channel_id_), "CHANNEL_CLOSE");
     ServiceBase::on_channel_close();
-    AA_LOG_I("%-18s %-24s", "video", "CHANNEL_CLOSE");
 }
 
 void VideoService::on_setup(const uint8_t* data, std::size_t size) {
@@ -202,6 +203,13 @@ void VideoService::send_ack() {
 }
 
 void VideoService::set_video_focus(bool projected) {
+    // Cluster / auxiliary displays are always-on glanceable surfaces
+    // — they don't participate in main UI focus negotiation. Engine
+    // broadcasts focus to every VideoService, so we filter here.
+    // (Main display still does the standard focus dance: phone opens
+    // ch1, HU sends VIDEO_FOCUS_NOTIF when surface ready, phone
+    // starts MEDIA_DATA.)
+    if (video_config_.display_type != VideoDisplayType::Main) return;
     if (projected) attach_sinks();
     else           detach_sinks();
     send_video_focus(projected);
@@ -209,12 +217,12 @@ void VideoService::set_video_focus(bool projected) {
 
 void VideoService::attach_sinks() {
     sinks_active_ = true;
-    AA_LOG_I("%-18s sinks attached", "video");
+    AA_LOG_I("%-18s sinks attached", channel_name(channel_id_));
 }
 
 void VideoService::detach_sinks() {
     sinks_active_ = false;
-    AA_LOG_I("%-18s sinks detached", "video");
+    AA_LOG_I("%-18s sinks detached", channel_name(channel_id_));
 }
 
 void VideoService::send_video_focus(bool gain) {
@@ -250,14 +258,20 @@ void VideoService::fill_config(
     vc->set_width_margin(0);
     vc->set_height_margin(0);
 
-    // Display type drives phone-side content routing — MAIN gets the
-    // full AA UI, CLUSTER gets glanceable cards. proto2 default is
-    // MAIN if unset; we always set it explicitly for clarity and so
-    // both MAIN and CLUSTER instances of VideoService produce
-    // self-describing ServiceDiscoveryResponse rows.
-    sink->set_display_type(static_cast<
-        aap_protobuf::service::media::sink::message::DisplayType>(
-            static_cast<int32_t>(video_config_.display_type)));
+    // Only emit display_type / display_id when they differ from the
+    // proto2 defaults (MAIN / 0). For a MAIN-only HU this keeps the
+    // SDR wire format identical to the pre-multi-display version —
+    // some AAP implementations are strict about extra fields and
+    // dropping the session was an observed failure mode (see Day 2
+    // of plan 0006).
+    if (video_config_.display_type != VideoDisplayType::Main) {
+        sink->set_display_type(static_cast<
+            aap_protobuf::service::media::sink::message::DisplayType>(
+                static_cast<int32_t>(video_config_.display_type)));
+    }
+    if (video_config_.display_id != 0) {
+        sink->set_display_id(video_config_.display_id);
+    }
 }
 
 } // namespace aauto::service

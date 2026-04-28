@@ -148,6 +148,7 @@ inline const char* channel_name(uint8_t ch) {
         case 12: return "media.browser";
         case 13: return "bluetooth";
         case 14: return "vendor.ext";
+        case 15: return "video.cluster";
         default:
             static thread_local char buf[8];
             snprintf(buf, sizeof(buf), "ch%u", ch);

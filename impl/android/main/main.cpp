@@ -161,7 +161,7 @@ public:
         constexpr int32_t kVideoMainChannel = 1;
         service::VideoServiceConfig vcfg{
             hu_.video_width, hu_.video_height, hu_.video_fps, hu_.video_density,
-            service::VideoDisplayType::Main};
+            service::VideoDisplayType::Main, /*display_id=*/0};
         uint32_t sid = current_session_id_;
         auto video_sink = std::make_shared<sink::CallbackVideoSink>(
             [this, sid, ch = kVideoMainChannel](const uint8_t* data,
@@ -177,6 +177,21 @@ public:
                 if (focus_cb_) focus_cb_(sid, projected);
             });
         services[kVideoMainChannel] = video_svc;
+
+        // Channel 15 (cluster video sink) is intentionally NOT
+        // registered. Day 2 of plan 0006 attempted it; the phone
+        // (SM-N981N over wireless) silently refuses any SDR that
+        // advertises a second media_sink_service entry — neither
+        // distinct display_id nor distinct display_type was enough
+        // to make it accept the SDR. The whole session is dropped
+        // ~1s after SDR with no CHANNEL_OPEN_REQ for any channel.
+        //
+        // VideoService still carries the display_type / display_id
+        // plumbing so a future re-attempt only needs to flip this
+        // block on (with whatever the missing capability turns out
+        // to be — possibly headunit_info make/model gating, or a
+        // car-certified SDR template). Same pattern as MediaBrowser
+        // ch12 (G.1).
 
         // Channel 2-4: Audio — forward PCM to app via callback
         auto make_audio = [&](int ch, sink::AudioStreamType st,

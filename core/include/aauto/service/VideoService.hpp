@@ -25,11 +25,12 @@ enum class VideoDisplayType : int32_t {
 };
 
 struct VideoServiceConfig {
-    uint32_t width   = 800;
-    uint32_t height  = 480;
-    uint32_t fps     = 30;
-    uint32_t density = 160;
+    uint32_t width      = 800;
+    uint32_t height     = 480;
+    uint32_t fps        = 30;
+    uint32_t density    = 160;
     VideoDisplayType display_type = VideoDisplayType::Main;
+    uint32_t display_id = 0;  // distinct ID per physical display
 };
 
 class VideoService : public ServiceBase {
