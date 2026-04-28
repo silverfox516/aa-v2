@@ -538,3 +538,62 @@ manually paused on the phone before the swap.
 the phone "you have focus" does not equal "play". Combine focus +
 explicit transport control (MEDIA_PLAY) for any state-machine
 transition that should result in audio.
+
+---
+
+## 24. First-frame audio pop on session start (TCC803x — not fixable from app)
+
+**Symptom**: A short "thunk"/"pop" is audible at the very moment the
+first audio sample reaches the speakers after a fresh AaService start
+(USB connect → Spotify/YT Music begins playing). The click is exactly
+at "sound first becomes audible", not before, not at any other point.
+Subsequent track changes have no click. Re-connecting the same phone
+within the same AaService lifetime does not reproduce.
+
+**Investigation (2026-04-28)**: Several `AudioTrack` API-level
+strategies were tried in `AudioPlayer.java` and none removed the
+click:
+
+1. **Reorder write-before-play()**: write the first PCM chunk into
+   the track in INITIALIZED state, then call `play()`. Theory: avoid
+   the buffer-empty → underrun-silence → step-jump-to-real-PCM
+   pattern. Result: no change.
+2. **Silence prefill (~80 ms of zeros) before play()**: write a
+   silent header so the audio HAL/amplifier wakes up while output is
+   still 0, masking any unmute click. Result: no change.
+3. **Dithered low-level prefill (±2 LSB pseudo-random)**: replace
+   pure silence with sub-audible noise so the amplifier doesn't
+   enter power-save during prefill. Result: no change.
+4. **Linear fade-in (~8 ms) on the first real chunk**: ramp the
+   speaker cone smoothly from 0 to playback amplitude instead of
+   stepping. Result: no change.
+
+The fact that NONE of these change anything — even with the audio
+buffer fully primed and amplitude continuously non-zero — strongly
+indicates the click does not originate from anything we feed
+`AudioTrack`. The click occurs the moment the audio output becomes
+*audible* regardless of buffer content. This points at OEM-specific
+amplifier / audio HAL behavior on the TCC803x reference board:
+either the amplifier is power-gated and produces a wake-up
+transient, or there's a route-activation click in the vendor HAL
+that the framework `AudioTrack` API can't reach.
+
+**Decision**: Accept as a vendor HAL limitation. Reverted all
+prefill/fade-in/dither code from AudioPlayer.java to keep that path
+straightforward (stream-fed AudioTrack with no special first-frame
+treatment). The cosmetic cost of one click on first AaService start
+is not worth the latency overhead and code complexity that didn't
+help anyway.
+
+**Re-attempt triggers**: revisit only if (a) we move audio output
+off the system mixer (e.g., direct ALSA / tinyalsa from native), or
+(b) a different OEM board with a different audio HAL is used, or
+(c) the vendor HAL itself can be patched (not in scope for this
+learning project).
+
+**Hypothetical alternative**: Pre-warm AudioTracks at AaService
+`onCreate` and keep them playing dither continuously, so the click
+occurs once at boot (inaudible / masked by ignition) and never on
+subsequent connects. Not pursued here — the value/effort ratio is
+poor for a learning project, and AaService is `android:persistent`
+anyway. Documented as an option for whoever inherits this code.
