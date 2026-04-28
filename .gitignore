@@ -1,1 +1,7 @@
 build/
+
+# Editor swap / temp files
+*.swp
+*.swo
+*~
+.DS_Store

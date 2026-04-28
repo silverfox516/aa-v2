@@ -76,7 +76,10 @@ public class DeviceListActivity extends Activity
     private static final int ITEM_PAD_H = 24;
 
     // Album cover size in px (square).
-    private static final int ALBUM_COVER_PX = 280;
+    private static final int ALBUM_COVER_PX = 180;
+    // ProgressBar height — horizontal style defaults to ~5dp (barely
+    // visible). Make it explicit so the playhead is actually noticeable.
+    private static final int PROGRESS_BAR_HEIGHT_PX = 16;
 
     // Menu item ids.
     private static final int MENU_BLUETOOTH = 1;
@@ -97,9 +100,11 @@ public class DeviceListActivity extends Activity
     private TextView  mediaSongView;
     private TextView  mediaArtistView;
     private TextView  mediaAlbumView;
+    private TextView  mediaPlaylistView;
+    private TextView  mediaSourceView;
     private ProgressBar mediaProgressBar;
     private TextView  mediaProgressView;
-    private TextView  mediaSourceView;
+    private TextView  mediaModeView;     // shuffle / repeat icons
     private TextView  mediaHintView;
     private Button    btnPrev;
     private Button    btnPlayPause;
@@ -233,14 +238,16 @@ public class DeviceListActivity extends Activity
             return;
         }
 
+        // PLAYING gets the only color emphasis (it's the only "active"
+        // state). PAUSED / STOPPED are not warnings — keep them neutral.
         String stateLabel;
         int stateColor;
         boolean isPlaying = false;
         switch (info.state) {
-            case 2:  stateLabel = "▶ PLAYING"; stateColor = COLOR_STATE_ACTIVE;     isPlaying = true; break;
-            case 3:  stateLabel = "⏸ PAUSED";  stateColor = COLOR_STATE_BACKGROUND; break;
-            case 1:  stateLabel = "■ STOPPED"; stateColor = COLOR_STATE_CONNECTING; break;
-            default: stateLabel = "";          stateColor = COLOR_TEXT_SUB;          break;
+            case 2:  stateLabel = "▶ PLAYING"; stateColor = COLOR_STATE_ACTIVE; isPlaying = true; break;
+            case 3:  stateLabel = "⏸ PAUSED";  stateColor = COLOR_TEXT;         break;
+            case 1:  stateLabel = "■ STOPPED"; stateColor = COLOR_TEXT_SUB;     break;
+            default: stateLabel = "";          stateColor = COLOR_TEXT_SUB;     break;
         }
         mediaStateView.setText(stateLabel);
         mediaStateView.setTextColor(stateColor);
@@ -249,19 +256,24 @@ public class DeviceListActivity extends Activity
         mediaArtistView.setText(info.artist);
         mediaAlbumView.setText(info.album);
 
+        if (info.playlist != null && !info.playlist.isEmpty()) {
+            mediaPlaylistView.setText("📃 " + info.playlist);
+            mediaPlaylistView.setVisibility(View.VISIBLE);
+        } else {
+            mediaPlaylistView.setVisibility(View.GONE);
+        }
+
         if (info.albumArt != null && info.albumArt.length > 0) {
             try {
                 Bitmap bm = BitmapFactory.decodeByteArray(
                         info.albumArt, 0, info.albumArt.length);
                 mediaAlbumCover.setImageBitmap(bm);
-                mediaAlbumCover.setVisibility(View.VISIBLE);
             } catch (Exception e) {
                 Log.w(TAG, "album art decode failed", e);
-                mediaAlbumCover.setVisibility(View.GONE);
+                mediaAlbumCover.setImageBitmap(null);
             }
         } else {
             mediaAlbumCover.setImageBitmap(null);
-            mediaAlbumCover.setVisibility(View.GONE);
         }
 
         if (info.durationSeconds > 0) {
@@ -271,12 +283,18 @@ public class DeviceListActivity extends Activity
             mediaProgressView.setText(formatTime(info.playbackSeconds)
                     + " / " + formatTime(info.durationSeconds));
         } else if (info.playbackSeconds > 0) {
-            mediaProgressBar.setVisibility(View.GONE);
+            mediaProgressBar.setVisibility(View.INVISIBLE);
             mediaProgressView.setText(formatTime(info.playbackSeconds));
         } else {
-            mediaProgressBar.setVisibility(View.GONE);
+            mediaProgressBar.setVisibility(View.INVISIBLE);
             mediaProgressView.setText("");
         }
+
+        StringBuilder modes = new StringBuilder();
+        if (info.shuffle)        modes.append("🔀 ");
+        if (info.repeatOne)      modes.append("🔂 ");
+        else if (info.repeat)    modes.append("🔁 ");
+        mediaModeView.setText(modes.toString().trim());
 
         mediaSourceView.setText(info.mediaSource.isEmpty()
                 ? "" : "source: " + info.mediaSource);
@@ -293,13 +311,14 @@ public class DeviceListActivity extends Activity
 
     private void clearMediaCard(String hint) {
         mediaAlbumCover.setImageBitmap(null);
-        mediaAlbumCover.setVisibility(View.GONE);
         mediaStateView.setText("");
         mediaSongView.setText("");
         mediaArtistView.setText("");
         mediaAlbumView.setText("");
-        mediaProgressBar.setVisibility(View.GONE);
+        mediaPlaylistView.setVisibility(View.GONE);
+        mediaProgressBar.setVisibility(View.INVISIBLE);
         mediaProgressView.setText("");
+        mediaModeView.setText("");
         mediaSourceView.setText("");
         mediaHintView.setText(hint);
         btnPrev.setEnabled(false);
@@ -429,87 +448,130 @@ public class DeviceListActivity extends Activity
     // ===== Middle panel: media playback card =====
 
     private LinearLayout buildMediaPanel() {
+        // Outer panel: vertical
+        //   header
+        //   ┌─ topRow ──────────────────────┐
+        //   │ albumCover │ info column      │
+        //   └────────────┴──────────────────┘
+        //   progress bar
+        //   progress text + mode icons
+        //   controls row
+        //   hint (when no playback)
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(COLOR_PANEL);
         panel.setPadding(PAD, PAD, PAD, PAD);
-        panel.setGravity(Gravity.CENTER_HORIZONTAL);
 
         TextView header = new TextView(this);
         header.setText("Now Playing");
         header.setTextSize(TEXT_MEDIA_SECONDARY);
         header.setTextColor(COLOR_TEXT_SUB);
-        header.setGravity(Gravity.CENTER_HORIZONTAL);
-        LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(
+        panel.addView(header, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // ----- Top row: album cover + info column -----
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.TOP);
+        LinearLayout.LayoutParams topRowLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        panel.addView(header, headerLp);
+        topRowLp.topMargin = PAD;
+        panel.addView(topRow, topRowLp);
 
+        // Album cover always occupies its slot so the layout doesn't
+        // shuffle when art arrives/leaves. The image inside is hidden
+        // when there's no art, but the box stays.
         mediaAlbumCover = new ImageView(this);
         mediaAlbumCover.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        mediaAlbumCover.setVisibility(View.GONE);
-        LinearLayout.LayoutParams coverLp = new LinearLayout.LayoutParams(
-                ALBUM_COVER_PX, ALBUM_COVER_PX);
-        coverLp.topMargin = PAD;
-        coverLp.gravity = Gravity.CENTER_HORIZONTAL;
-        panel.addView(mediaAlbumCover, coverLp);
+        mediaAlbumCover.setBackgroundColor(COLOR_BG); // empty placeholder color
+        topRow.addView(mediaAlbumCover, new LinearLayout.LayoutParams(
+                ALBUM_COVER_PX, ALBUM_COVER_PX));
+
+        // Info column to the right of the cover.
+        LinearLayout info = new LinearLayout(this);
+        info.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        infoLp.leftMargin = PAD;
+        topRow.addView(info, infoLp);
 
         mediaStateView = new TextView(this);
         mediaStateView.setTextSize(TEXT_MEDIA_SECONDARY);
         mediaStateView.setTextColor(COLOR_STATE_ACTIVE);
         mediaStateView.setTypeface(Typeface.DEFAULT_BOLD);
-        mediaStateView.setGravity(Gravity.CENTER_HORIZONTAL);
-        LinearLayout.LayoutParams stateLp = new LinearLayout.LayoutParams(
+        info.addView(mediaStateView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        stateLp.topMargin = PAD / 2;
-        panel.addView(mediaStateView, stateLp);
+                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         mediaSongView = new TextView(this);
         mediaSongView.setTextSize(TEXT_MEDIA_TITLE);
         mediaSongView.setTextColor(COLOR_TEXT);
         mediaSongView.setTypeface(Typeface.DEFAULT_BOLD);
-        mediaSongView.setGravity(Gravity.CENTER_HORIZONTAL);
-        LinearLayout.LayoutParams songLp = new LinearLayout.LayoutParams(
+        info.addView(mediaSongView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        songLp.topMargin = PAD / 2;
-        panel.addView(mediaSongView, songLp);
+                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         mediaArtistView = new TextView(this);
         mediaArtistView.setTextSize(TEXT_MEDIA_SECONDARY);
         mediaArtistView.setTextColor(COLOR_TEXT);
-        mediaArtistView.setGravity(Gravity.CENTER_HORIZONTAL);
-        panel.addView(mediaArtistView, new LinearLayout.LayoutParams(
+        info.addView(mediaArtistView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
         mediaAlbumView = new TextView(this);
         mediaAlbumView.setTextSize(TEXT_MEDIA_SECONDARY);
         mediaAlbumView.setTextColor(COLOR_TEXT_SUB);
-        mediaAlbumView.setGravity(Gravity.CENTER_HORIZONTAL);
-        panel.addView(mediaAlbumView, new LinearLayout.LayoutParams(
+        info.addView(mediaAlbumView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        mediaPlaylistView = new TextView(this);
+        mediaPlaylistView.setTextSize(TEXT_MEDIA_HINT);
+        mediaPlaylistView.setTextColor(COLOR_TEXT_SUB);
+        info.addView(mediaPlaylistView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        mediaSourceView = new TextView(this);
+        mediaSourceView.setTextSize(TEXT_MEDIA_HINT);
+        mediaSourceView.setTextColor(COLOR_TEXT_SUB);
+        info.addView(mediaSourceView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // ----- Progress bar -----
         mediaProgressBar = new ProgressBar(this, null,
                 android.R.attr.progressBarStyleHorizontal);
-        mediaProgressBar.setVisibility(View.GONE);
         LinearLayout.LayoutParams progBarLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.MATCH_PARENT, PROGRESS_BAR_HEIGHT_PX);
         progBarLp.topMargin = PAD;
         panel.addView(mediaProgressBar, progBarLp);
+
+        // Progress text + mode icons (shuffle/repeat) on the same row.
+        LinearLayout progRow = new LinearLayout(this);
+        progRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams progRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        progRowLp.topMargin = PAD / 4;
+        panel.addView(progRow, progRowLp);
 
         mediaProgressView = new TextView(this);
         mediaProgressView.setTextSize(TEXT_MEDIA_HINT);
         mediaProgressView.setTextColor(COLOR_TEXT_SUB);
-        mediaProgressView.setGravity(Gravity.CENTER_HORIZONTAL);
-        panel.addView(mediaProgressView, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
+        progRow.addView(mediaProgressView, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        mediaModeView = new TextView(this);
+        mediaModeView.setTextSize(TEXT_MEDIA_SECONDARY);
+        mediaModeView.setTextColor(COLOR_TEXT);
+        progRow.addView(mediaModeView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // Control buttons row: ⏮ ▶/⏸ ⏭
+        // ----- Control buttons row: ⏮ ▶/⏸ ⏭ -----
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setGravity(Gravity.CENTER);
@@ -517,6 +579,7 @@ public class DeviceListActivity extends Activity
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         controlsLp.topMargin = PAD;
+        panel.addView(controls, controlsLp);
 
         btnPrev = makeMediaButton("⏮");
         btnPrev.setOnClickListener(v -> {
@@ -536,18 +599,7 @@ public class DeviceListActivity extends Activity
         });
         controls.addView(btnNext, mediaButtonLp());
 
-        panel.addView(controls, controlsLp);
-
-        mediaSourceView = new TextView(this);
-        mediaSourceView.setTextSize(TEXT_MEDIA_HINT);
-        mediaSourceView.setTextColor(COLOR_TEXT_SUB);
-        mediaSourceView.setGravity(Gravity.CENTER_HORIZONTAL);
-        LinearLayout.LayoutParams sourceLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        sourceLp.topMargin = PAD;
-        panel.addView(mediaSourceView, sourceLp);
-
+        // ----- Hint (only visible when no playback) -----
         mediaHintView = new TextView(this);
         mediaHintView.setTextSize(TEXT_MEDIA_SECONDARY);
         mediaHintView.setTextColor(COLOR_TEXT_SUB);
@@ -555,7 +607,7 @@ public class DeviceListActivity extends Activity
         LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        hintLp.topMargin = PAD * 2;
+        hintLp.topMargin = PAD;
         panel.addView(mediaHintView, hintLp);
 
         return panel;

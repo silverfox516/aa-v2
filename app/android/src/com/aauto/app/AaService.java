@@ -73,6 +73,7 @@ public class AaService extends Service implements SessionLifecycleListener {
         public String artist        = "";
         public String album         = "";
         public byte[] albumArt      = null;  // PNG/JPEG bytes; may be null
+        public String playlist      = "";
         public int  durationSeconds = 0;
 
         void update(int sid, int s, String src, int pos,
@@ -87,12 +88,13 @@ public class AaService extends Service implements SessionLifecycleListener {
         }
 
         void updateMetadata(int sid, String s, String ar, String al,
-                            byte[] art, int dur) {
+                            byte[] art, String pl, int dur) {
             sessionId = sid;
             song = s != null ? s : "";
             artist = ar != null ? ar : "";
             album = al != null ? al : "";
             albumArt = art;
+            playlist = pl != null ? pl : "";
             durationSeconds = dur;
         }
     }
@@ -227,10 +229,10 @@ public class AaService extends Service implements SessionLifecycleListener {
         @Override
         public void onPlaybackMetadata(int sessionId, String song, String artist,
                                        String album, byte[] albumArt,
-                                       int durationSeconds) {
+                                       String playlist, int durationSeconds) {
             handler.post(() -> {
                 getOrCreatePlayback(sessionId).updateMetadata(sessionId, song, artist,
-                        album, albumArt, durationSeconds);
+                        album, albumArt, playlist, durationSeconds);
                 notifyDeviceStateChanged();
             });
         }

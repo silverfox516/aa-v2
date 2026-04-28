@@ -290,6 +290,7 @@ void AidlEngineController::on_playback_metadata(
         const std::string& artist,
         const std::string& album,
         const std::vector<uint8_t>& album_art,
+        const std::string& playlist,
         uint32_t duration_seconds) {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     if (callback_ == nullptr) return;
@@ -299,6 +300,7 @@ void AidlEngineController::on_playback_metadata(
         android::String16(artist.c_str()),
         android::String16(album.c_str()),
         album_art,
+        android::String16(playlist.c_str()),
         static_cast<int32_t>(duration_seconds));
 }
 

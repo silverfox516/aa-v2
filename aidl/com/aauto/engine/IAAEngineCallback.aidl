@@ -49,9 +49,11 @@ interface IAAEngineCallback {
     /**
      * Media playback metadata from phone (channel 10).
      * Sent on track change / playback start. albumArt is PNG/JPEG bytes
-     * (typically 3KB-90KB depending on the album).
+     * (typically 3KB-90KB depending on the album). playlist is the
+     * current playlist/queue name when the source app provides it
+     * (often empty).
      */
     oneway void onPlaybackMetadata(int sessionId, String song, String artist,
                                    String album, in byte[] albumArt,
-                                   int durationSeconds);
+                                   String playlist, int durationSeconds);
 }

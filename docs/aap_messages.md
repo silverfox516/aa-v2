@@ -229,14 +229,23 @@ CHANNEL_OPEN: ch=1 (video)
 |----|---------|-----------|-------|---------|------|--------|----------|
 | 32769 | PLAYBACK_STATUS | Phone → HU | runtime | 1초 간격 / state 전이 시 | 재생 상태 (state, media_source, playback_seconds, shuffle, repeat) | ✅ passive handler (parse + log) | SM-N981N (PAUSED/PLAYING 전이 + pos 1초 단위 증가 관찰) |
 | 32770 | PLAYBACK_INPUT | HU → Phone | runtime | media key / steering wheel | 재생 제어 (play/pause/skip/seek) | ⬜ 미구현 | |
-| 32771 | PLAYBACK_METADATA | Phone → HU | runtime | 곡 변경 / 재생 시작 시 | 메타데이터 (song, artist, album, album_art bytes, duration, rating) | ✅ passive handler (parse + log) | SM-N981N (한국어 곡명 UTF-8 통과; album_art 3KB~90KB 변동) |
+| 32770 | PLAYBACK_INPUT | HU → Phone | runtime | media key / steering wheel | 재생 제어 (play/pause/skip/seek) | ✅ KEYCODE_MEDIA_{PLAY,PAUSE,PLAY_PAUSE,NEXT,PREVIOUS} via Input ch | SM-N981N (Spotify/YT Music 응답) |
+| 32771 | PLAYBACK_METADATA | Phone → HU | runtime | 곡 변경 / 재생 시작 시 | 메타데이터 (song, artist, album, album_art bytes, playlist, duration, rating) | ✅ passive handler (parse + log + UI) | SM-N981N (한국어 곡명 UTF-8 통과; album_art 3KB~90KB 변동; playlist는 소스 앱이 제공할 때만 채움 — Spotify는 채우고 YT Music은 보통 빈 문자열) |
 
 ### MediaPlaybackStatus 필드
 - state: PLAYING/PAUSED/STOPPED
-- source: 미디어 소스 (Spotify, YouTube Music 등)
-- song_title, artist, album: 곡 정보
-- position_ms, duration_ms: 재생 위치/전체 길이
-- album_art: 앨범아트 이미지 (PNG/JPEG, 50-90KB — multi-fragment 검증 트래픽)
+- media_source: 미디어 소스 앱명 (Spotify, YouTube Music 등)
+- playback_seconds: 재생 위치 (초 단위)
+- shuffle, repeat, repeat_one: 재생 모드 플래그
+
+### MediaPlaybackMetadata 필드
+- song, artist, album: 곡 정보 (UTF-8)
+- album_art: PNG/JPEG bytes, 3KB~90KB (multi-fragment 검증 트래픽)
+- playlist: 현재 재생 중인 playlist/queue 이름 (소스 앱이 제공할 때만; 미제공 시 빈 문자열)
+- duration_seconds: 전체 길이
+- rating: 별점/좋아요 (소스 앱 의존)
+
+재생 제어 송신 경로: `Input ch (KEYCODE_*)` — `MEDIA_PLAY=126`, `MEDIA_PAUSE=127`, `MEDIA_PLAY_PAUSE=85`, `MEDIA_NEXT=87`, `MEDIA_PREVIOUS=88`. PLAYBACK_INPUT 메시지를 직접 송신하지 않고 InputReport.key_event로 down+up 페어를 보내는 것이 폰 측 호환성이 가장 좋다 (배경 세션 복귀 시 GAIN focus만으로는 재생 재개되지 않아 MEDIA_PLAY까지 송신해야 함 — troubleshooting #23 참고).
 
 ---
 

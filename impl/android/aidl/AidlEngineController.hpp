@@ -81,6 +81,7 @@ public:
                               const std::string& artist,
                               const std::string& album,
                               const std::vector<uint8_t>& album_art,
+                              const std::string& playlist,
                               uint32_t duration_seconds) override;
 
 private:

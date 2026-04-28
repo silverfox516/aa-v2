@@ -136,7 +136,7 @@ public:
     using PlaybackMetadataCb = std::function<void(uint32_t session_id,
         const std::string& song, const std::string& artist,
         const std::string& album, const std::vector<uint8_t>& album_art,
-        uint32_t duration_seconds)>;
+        const std::string& playlist, uint32_t duration_seconds)>;
 
     AndroidServiceFactory(const engine::HeadunitConfig& config,
                           VideoDataCb video_cb, AudioDataCb audio_cb,
@@ -223,10 +223,11 @@ public:
                 [this, sid](const std::string& song, const std::string& artist,
                        const std::string& album,
                        const std::vector<uint8_t>& album_art,
+                       const std::string& playlist,
                        uint32_t duration) {
                     if (playback_metadata_cb_) {
                         playback_metadata_cb_(sid, song, artist, album,
-                                              album_art, duration);
+                                              album_art, playlist, duration);
                     }
                 });
             services[10] = playback_svc;
@@ -316,10 +317,11 @@ int main(int /*argc*/, char* /*argv*/[]) {
         [&aidl_raw](uint32_t sid, const std::string& song,
                     const std::string& artist, const std::string& album,
                     const std::vector<uint8_t>& album_art,
+                    const std::string& playlist,
                     uint32_t duration) {
             if (aidl_raw) {
                 aidl_raw->on_playback_metadata(
-                    sid, song, artist, album, album_art, duration);
+                    sid, song, artist, album, album_art, playlist, duration);
             }
         }
     );

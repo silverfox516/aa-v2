@@ -500,3 +500,41 @@ closer to "is the upper layer actually consuming this channel's
 messages?" Even a passive parse-and-log handler counts. The G.0 rule
 stays — silent stubs are not free — but the bar for "responsive" is
 lower than initially feared: registering a handler is enough.
+
+---
+
+## 23. Audio does not resume after foreground/background ping-pong
+
+**Symptom**: Two phones connected (USB + wireless). Phone A is active and
+playing music. Long-press phone B → phone B becomes BACKGROUND audio
+source, music resumes from B. Long-press phone A again → A goes back to
+BACKGROUND, but no audio comes out. The active session (now B-on-screen,
+A-as-audio-source) shows PAUSED state. UI controls work, but auto-resume
+on focus swap is broken.
+
+**Root cause**: When we transition a session BACKGROUND, we call
+`gainAudioFocus(sid)` to send an unsolicited `AUDIO_FOCUS_NOTIFICATION
+state=GAIN` on the control channel. The phone receives the GAIN but
+does NOT auto-restart playback — the phone-side media app sees focus
+returned but stays in its last `STOPPED`/`PAUSED` state because the
+user (from the phone's perspective) didn't press play. Sending an
+unsolicited GAIN is also non-standard; the AAP convention is that
+focus changes are negotiated via REQUEST/NOTIFICATION pairs.
+
+**Fix (2026-04-28)**: In `AaService.resumePhoneMedia(sid)`, after
+`gainAudioFocus`, also send `KEYCODE_MEDIA_PLAY (126)` via the Input
+channel. The MEDIA_PLAY keycode (not MEDIA_PLAY_PAUSE — which would
+toggle and pause an already-playing source) reliably resumes the
+phone's media app regardless of its previous state. Verified on
+SM-N981N with Spotify and YouTube Music.
+
+**Why MEDIA_PLAY and not MEDIA_PLAY_PAUSE here**: The two coordinator
+paths differ — explicit user button presses on the HU UI use
+PLAY_PAUSE (toggle), while internal focus-swap recovery must always
+play. Conflating them caused playback to stop when the user had just
+manually paused on the phone before the swap.
+
+**Lesson**: AAP audio focus is informational, not commanding. Telling
+the phone "you have focus" does not equal "play". Combine focus +
+explicit transport control (MEDIA_PLAY) for any state-machine
+transition that should result in audio.

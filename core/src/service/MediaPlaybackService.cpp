@@ -67,11 +67,12 @@ MediaPlaybackService::MediaPlaybackService(SendMessageFn send_fn)
                 return;
             }
             AA_LOG_I("%-18s %-24s song=\"%s\" artist=\"%s\" album=\"%s\""
-                     " duration=%us album_art=%zuB rating=%d",
+                     " playlist=\"%s\" duration=%us album_art=%zuB rating=%d",
                      "media.playback", "PLAYBACK_METADATA",
                      msg.song().c_str(),
                      msg.artist().c_str(),
                      msg.album().c_str(),
+                     msg.playlist().c_str(),
                      msg.duration_seconds(),
                      msg.album_art().size(),
                      msg.rating());
@@ -82,6 +83,7 @@ MediaPlaybackService::MediaPlaybackService(SendMessageFn send_fn)
                              msg.artist(),
                              msg.album(),
                              art,
+                             msg.playlist(),
                              msg.duration_seconds());
             }
         });

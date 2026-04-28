@@ -42,12 +42,14 @@ public:
         bool repeat_one)>;
 
     /// PLAYBACK_METADATA callback: album_art is the raw image bytes
-    /// (PNG/JPEG, can be 3KB-90KB).
+    /// (PNG/JPEG, can be 3KB-90KB). playlist is the current
+    /// playlist/queue name when the source app provides it.
     using MetadataCallback = std::function<void(
         const std::string& song,
         const std::string& artist,
         const std::string& album,
         const std::vector<uint8_t>& album_art,
+        const std::string& playlist,
         uint32_t duration_seconds)>;
 
     explicit MediaPlaybackService(SendMessageFn send_fn);
