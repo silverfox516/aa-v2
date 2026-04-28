@@ -66,17 +66,17 @@ public class DeviceListActivity extends Activity
     // Text sizes (sp).
     private static final int TEXT_DEVICE_NAME     = 22;
     private static final int TEXT_DEVICE_STATUS   = 18;
-    private static final int TEXT_MEDIA_TITLE     = 24;
-    private static final int TEXT_MEDIA_SECONDARY = 18;
-    private static final int TEXT_MEDIA_HINT      = 16;
-    private static final int TEXT_BUTTON          = 22;
+    private static final int TEXT_MEDIA_TITLE     = 30;
+    private static final int TEXT_MEDIA_SECONDARY = 22;
+    private static final int TEXT_MEDIA_HINT      = 18;
+    private static final int TEXT_BUTTON          = 32;
 
     private static final int PAD        = 24;
     private static final int ITEM_PAD_V = 22;
     private static final int ITEM_PAD_H = 24;
 
     // Album cover size in px (square).
-    private static final int ALBUM_COVER_PX = 180;
+    private static final int ALBUM_COVER_PX = 280;
     // ProgressBar height — horizontal style defaults to ~5dp (barely
     // visible). Make it explicit so the playhead is actually noticeable.
     private static final int PROGRESS_BAR_HEIGHT_PX = 16;
@@ -117,25 +117,23 @@ public class DeviceListActivity extends Activity
         super.onCreate(savedInstanceState);
         setTitle("Android Auto v" + readVersionName());
 
-        // Root: 3 equal-width columns.
+        // Root: 2 equal columns — device list on the left, media
+        // playback card on the right. Track list (originally a third
+        // column) was removed; MediaBrowser channel-12 path is on
+        // hold so there's no data to populate it (see G.1).
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.HORIZONTAL);
         root.setBackgroundColor(COLOR_BG);
         root.setPadding(PAD, PAD, PAD, PAD);
 
         ListView listView = buildDeviceList();
-        LinearLayout.LayoutParams listLp = equalColumn();
+        LinearLayout.LayoutParams listLp = weightedColumn(1f);
         root.addView(listView, listLp);
 
         LinearLayout mediaPanel = buildMediaPanel();
-        LinearLayout.LayoutParams mediaLp = equalColumn();
+        LinearLayout.LayoutParams mediaLp = weightedColumn(1f);
         mediaLp.leftMargin = PAD;
         root.addView(mediaPanel, mediaLp);
-
-        LinearLayout trackPanel = buildTrackListPanel();
-        LinearLayout.LayoutParams trackLp = equalColumn();
-        trackLp.leftMargin = PAD;
-        root.addView(trackPanel, trackLp);
 
         setContentView(root);
 
@@ -160,9 +158,9 @@ public class DeviceListActivity extends Activity
         super.onDestroy();
     }
 
-    private static LinearLayout.LayoutParams equalColumn() {
+    private static LinearLayout.LayoutParams weightedColumn(float weight) {
         return new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
+                0, ViewGroup.LayoutParams.MATCH_PARENT, weight);
     }
 
     // ===== Toolbar overflow menu (BT / WiFi AP toggle) =====
@@ -571,14 +569,20 @@ public class DeviceListActivity extends Activity
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // ----- Control buttons row: ⏮ ▶/⏸ ⏭ -----
+        // Flexible spacer — claims leftover vertical space so the
+        // controls row below sits glued to the bottom of the panel
+        // instead of floating just below the progress text.
+        View bottomSpacer = new View(this);
+        panel.addView(bottomSpacer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        // ----- Control buttons row: ⏮ ▶/⏸ ⏭ (pinned to bottom) -----
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams controlsLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        controlsLp.topMargin = PAD;
         panel.addView(controls, controlsLp);
 
         btnPrev = makeMediaButton("⏮");
@@ -626,37 +630,9 @@ public class DeviceListActivity extends Activity
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.leftMargin = PAD / 2;
-        lp.rightMargin = PAD / 2;
+        lp.leftMargin = PAD;
+        lp.rightMargin = PAD;
         return lp;
-    }
-
-    // ===== Right panel: track list (placeholder) =====
-
-    private LinearLayout buildTrackListPanel() {
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackgroundColor(COLOR_PANEL);
-        panel.setPadding(PAD, PAD, PAD, PAD);
-
-        TextView header = new TextView(this);
-        header.setText("Track List");
-        header.setTextSize(TEXT_MEDIA_SECONDARY);
-        header.setTextColor(COLOR_TEXT_SUB);
-        panel.addView(header);
-
-        TextView placeholder = new TextView(this);
-        placeholder.setText("(coming soon)");
-        placeholder.setTextSize(TEXT_MEDIA_HINT);
-        placeholder.setTextColor(COLOR_TEXT_SUB);
-        placeholder.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT);
-        lp.topMargin = PAD * 2;
-        panel.addView(placeholder, lp);
-
-        return panel;
     }
 
     // ===== Service connection =====
