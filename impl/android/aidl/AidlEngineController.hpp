@@ -36,6 +36,12 @@ public:
     android::binder::Status sendTouchEvent(
         int32_t sessionId, int32_t x, int32_t y, int32_t action) override;
 
+    android::binder::Status sendMediaKey(
+        int32_t sessionId, int32_t keycode) override;
+
+    android::binder::Status releaseAudioFocus(int32_t sessionId) override;
+    android::binder::Status gainAudioFocus(int32_t sessionId) override;
+
     android::binder::Status setVideoFocus(
         int32_t sessionId, bool projected) override;
     android::binder::Status attachAllSinks(int32_t sessionId) override;
@@ -63,6 +69,19 @@ public:
                        const uint8_t* data, std::size_t size,
                        int64_t timestamp_us) override;
     void on_video_focus_changed(uint32_t session_id, bool projected) override;
+    void on_playback_status(uint32_t session_id,
+                            int32_t state,
+                            const std::string& media_source,
+                            uint32_t playback_seconds,
+                            bool shuffle,
+                            bool repeat,
+                            bool repeat_one) override;
+    void on_playback_metadata(uint32_t session_id,
+                              const std::string& song,
+                              const std::string& artist,
+                              const std::string& album,
+                              const std::vector<uint8_t>& album_art,
+                              uint32_t duration_seconds) override;
 
 private:
     engine::IEngineController* engine_;

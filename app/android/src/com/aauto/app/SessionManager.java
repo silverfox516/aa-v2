@@ -92,6 +92,51 @@ class SessionManager {
     }
 
     /**
+     * Returns the single ACTIVE session (full AA screen) if any.
+     * Invariant: at most one ACTIVE session at any time.
+     */
+    synchronized SessionEntry getActiveSession() {
+        for (SessionEntry e : sessions.values()) {
+            if (e.state == SessionState.ACTIVE) return e;
+        }
+        return null;
+    }
+
+    /**
+     * Returns the single BACKGROUND session (audio-only) if any.
+     * Invariant: at most one BACKGROUND session at any time.
+     */
+    synchronized SessionEntry getBackgroundSession() {
+        for (SessionEntry e : sessions.values()) {
+            if (e.state == SessionState.BACKGROUND) return e;
+        }
+        return null;
+    }
+
+    /**
+     * True iff some session currently has audio/video flowing
+     * (ACTIVE or BACKGROUND). Used by AaService to decide whether
+     * a newly-connected phone should be auto-activated.
+     */
+    synchronized boolean hasAudioOrVideo() {
+        for (SessionEntry e : sessions.values()) {
+            if (e.state == SessionState.ACTIVE
+                    || e.state == SessionState.BACKGROUND) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Mark session as BACKGROUND (audio-only, no full-screen). */
+    synchronized void background(int sessionId) {
+        SessionEntry entry = sessions.get(sessionId);
+        if (entry == null) return;
+        entry.state = SessionState.BACKGROUND;
+        Log.i(TAG, "session background: id=" + sessionId);
+    }
+
+    /**
      * Return all sessions whose {@code transportLabel} matches.
      *
      * Used by transport-specific coordinators to find their sessions

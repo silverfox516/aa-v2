@@ -56,6 +56,60 @@ public class AaService extends Service implements SessionLifecycleListener {
     private UiNavigationController uiNavigationController;
     private final PlaybackController playbackController = new PlaybackController();
 
+    /**
+     * Latest media playback state for a specific session.
+     * Updated from the engine callback on the main handler thread; UI
+     * reads it from the same thread, so no synchronization needed.
+     */
+    public static final class PlaybackInfo {
+        public int  sessionId       = -1;
+        public int  state           = 0;     // 1=STOPPED, 2=PLAYING, 3=PAUSED
+        public String mediaSource   = "";
+        public int  playbackSeconds = 0;
+        public boolean shuffle      = false;
+        public boolean repeat       = false;
+        public boolean repeatOne    = false;
+        public String song          = "";
+        public String artist        = "";
+        public String album         = "";
+        public byte[] albumArt      = null;  // PNG/JPEG bytes; may be null
+        public int  durationSeconds = 0;
+
+        void update(int sid, int s, String src, int pos,
+                    boolean shuf, boolean rep, boolean repOne) {
+            sessionId = sid;
+            state = s;
+            mediaSource = src != null ? src : "";
+            playbackSeconds = pos;
+            shuffle = shuf;
+            repeat = rep;
+            repeatOne = repOne;
+        }
+
+        void updateMetadata(int sid, String s, String ar, String al,
+                            byte[] art, int dur) {
+            sessionId = sid;
+            song = s != null ? s : "";
+            artist = ar != null ? ar : "";
+            album = al != null ? al : "";
+            albumArt = art;
+            durationSeconds = dur;
+        }
+    }
+
+    /** Per-session playback cache (key = session_id). */
+    private final java.util.Map<Integer, PlaybackInfo> playbackCache =
+            new java.util.HashMap<>();
+
+    private PlaybackInfo getOrCreatePlayback(int sessionId) {
+        PlaybackInfo info = playbackCache.get(sessionId);
+        if (info == null) {
+            info = new PlaybackInfo();
+            playbackCache.put(sessionId, info);
+        }
+        return info;
+    }
+
     public interface DeviceStateListener {
         void onDeviceStateChanged();
     }
@@ -134,6 +188,14 @@ public class AaService extends Service implements SessionLifecycleListener {
                     }
                 }
                 sessionManager.onPhoneIdentified(sessionId, deviceName);
+                // Scenario 1: if no other phone is currently playing
+                // audio/video (no ACTIVE / BG), auto-promote this one.
+                // Scenario 2: otherwise leave it CONNECTED (no-op).
+                if (!sessionManager.hasAudioOrVideo()) {
+                    Log.i(TAG, "auto-activating session " + sessionId
+                            + " (no other audio/video session)");
+                    activateSession(sessionId);
+                }
                 notifyDeviceStateChanged();
             });
         }
@@ -147,6 +209,28 @@ public class AaService extends Service implements SessionLifecycleListener {
                 Intent intent = new Intent(ACTION_VIDEO_FOCUS_CHANGED);
                 intent.putExtra(EXTRA_PROJECTED, projected);
                 sendBroadcast(intent);
+                notifyDeviceStateChanged();
+            });
+        }
+
+        @Override
+        public void onPlaybackStatus(int sessionId, int state, String mediaSource,
+                                     int playbackSeconds, boolean shuffle,
+                                     boolean repeat, boolean repeatOne) {
+            handler.post(() -> {
+                getOrCreatePlayback(sessionId).update(sessionId, state, mediaSource,
+                        playbackSeconds, shuffle, repeat, repeatOne);
+                notifyDeviceStateChanged();
+            });
+        }
+
+        @Override
+        public void onPlaybackMetadata(int sessionId, String song, String artist,
+                                       String album, byte[] albumArt,
+                                       int durationSeconds) {
+            handler.post(() -> {
+                getOrCreatePlayback(sessionId).updateMetadata(sessionId, song, artist,
+                        album, albumArt, durationSeconds);
                 notifyDeviceStateChanged();
             });
         }
@@ -276,6 +360,7 @@ public class AaService extends Service implements SessionLifecycleListener {
             playbackController.clearSessionPlayback();
             sendBroadcast(new Intent(ACTION_SESSION_ENDED));
         }
+        playbackCache.remove(sessionId);
         notifyDeviceStateChanged();
     }
 
@@ -299,6 +384,22 @@ public class AaService extends Service implements SessionLifecycleListener {
         return sessionManager;
     }
 
+    /** Per-session lookup. */
+    public PlaybackInfo getPlaybackInfo(int sessionId) {
+        return playbackCache.get(sessionId);
+    }
+
+    /**
+     * Convenience for the device-list UI: return playback info for the
+     * currently BACKGROUND session (the one whose audio is playing
+     * while the user is on the device list). null if no BG session.
+     */
+    public PlaybackInfo getBackgroundPlaybackInfo() {
+        SessionManager.SessionEntry bg = sessionManager.getBackgroundSession();
+        if (bg == null) return null;
+        return playbackCache.get(bg.sessionId);
+    }
+
     public boolean isBluetoothEnabled() {
         BluetoothAdapter bt = BluetoothAdapter.getDefaultAdapter();
         return bt != null && bt.isEnabled();
@@ -310,8 +411,13 @@ public class AaService extends Service implements SessionLifecycleListener {
     }
 
     /**
-     * Activate a session — deactivate current ACTIVE (if any), then activate new.
-     * Sends VideoFocus(NATIVE) to old, VideoFocus(PROJECTED) to new.
+     * Promote a session to ACTIVE — full AA screen + all sinks.
+     * Used by short-press on the device list, and by the auto-activate
+     * path on phone connect when no other session is playing.
+     *
+     * Demotes any other ACTIVE/BACKGROUND session to CONNECTED
+     * (audio focus loss + detach), enforcing the single-active /
+     * single-background invariant.
      */
     public void activateSession(int sessionId) {
         if (engineProxy == null) return;
@@ -321,26 +427,104 @@ public class AaService extends Service implements SessionLifecycleListener {
             return;
         }
         try {
-            // Deactivate current ACTIVE/BACKGROUND session (if different)
-            for (SessionManager.SessionEntry e : sessionManager.getAll()) {
-                if ((e.state == SessionManager.SessionState.ACTIVE
-                        || e.state == SessionManager.SessionState.BACKGROUND)
-                        && e.sessionId != sessionId) {
-                    Log.i(TAG, "deactivating session " + e.sessionId);
-                    engineProxy.setVideoFocus(e.sessionId, false);
-                    engineProxy.detachAllSinks(e.sessionId);
-                    sessionManager.deactivate(e.sessionId);
-                }
-            }
+            demoteOtherSessions(sessionId);
             // Prepare session — attach sinks, open display.
-            // VideoFocus(PROJECTED) will be sent when Surface is ready.
+            // VideoFocus(PROJECTED) will be sent when Surface is ready
+            // (driven by AaDisplayActivity's surface lifecycle, F.14).
             engineProxy.attachAllSinks(sessionId);
+            resumePhoneMedia(sessionId);
             sessionManager.activate(sessionId);
             if (uiNavigationController != null) {
                 uiNavigationController.showDisplayFlow();
             }
         } catch (RemoteException e) {
             Log.e(TAG, "activateSession failed", e);
+        }
+    }
+
+    /**
+     * Move a session to BACKGROUND (audio-only, no AA screen).
+     * Used by long-press on the device list. Sinks are attached but
+     * VideoFocus(PROJECTED) is intentionally NOT sent — the phone keeps
+     * its native screen and only audio flows.
+     *
+     * Single-background invariant: any prior BG (or ACTIVE) session is
+     * demoted to CONNECTED via the same audio-focus-loss path.
+     */
+    public void activateBackground(int sessionId) {
+        if (engineProxy == null) return;
+        SessionManager.SessionEntry entry = sessionManager.getSession(sessionId);
+        if (entry == null || entry.state == SessionManager.SessionState.CONNECTING) {
+            Log.w(TAG, "session " + sessionId + " not ready to background");
+            return;
+        }
+        if (entry.state == SessionManager.SessionState.BACKGROUND) {
+            return; // already BG
+        }
+        try {
+            demoteOtherSessions(sessionId);
+            engineProxy.attachAllSinks(sessionId);
+            resumePhoneMedia(sessionId);
+            // Don't call setVideoFocus here — without PROJECTED the phone
+            // won't push video frames. We intentionally only get audio.
+            sessionManager.background(sessionId);
+        } catch (RemoteException e) {
+            Log.e(TAG, "activateBackground failed", e);
+        }
+    }
+
+    /**
+     * Best-effort make the phone's media app start (or keep) playing.
+     *
+     * AudioFocus(GAIN) tells the phone HU has audio focus again — but
+     * empirically a phone in PAUSED state doesn't resume from
+     * unsolicited GAIN alone. KEYCODE_MEDIA_PLAY is sent right after
+     * as a positive instruction; if the phone is already PLAYING the
+     * media key is idempotent (PLAY != PLAY_PAUSE).
+     */
+    private void resumePhoneMedia(int sessionId) throws RemoteException {
+        engineProxy.gainAudioFocus(sessionId);
+        engineProxy.sendMediaKey(sessionId, KEYCODE_MEDIA_PLAY);
+    }
+
+    private static final int KEYCODE_MEDIA_PLAY = 126;
+
+    /**
+     * Demote every session except {@code keepSessionId} that is in
+     * ACTIVE or BACKGROUND state down to CONNECTED. Sends
+     * AudioFocus(LOSS) so the phone's media app stops actually playing.
+     */
+    private void demoteOtherSessions(int keepSessionId) throws RemoteException {
+        for (SessionManager.SessionEntry e : sessionManager.getAll()) {
+            if (e.sessionId == keepSessionId) continue;
+            if (e.state != SessionManager.SessionState.ACTIVE
+                    && e.state != SessionManager.SessionState.BACKGROUND) continue;
+            Log.i(TAG, "demoting session " + e.sessionId
+                    + " (was " + e.state + ")");
+            engineProxy.setVideoFocus(e.sessionId, false);
+            engineProxy.releaseAudioFocus(e.sessionId);
+            engineProxy.detachAllSinks(e.sessionId);
+            sessionManager.deactivate(e.sessionId);
+        }
+    }
+
+    /**
+     * Send a media-control key (KeyCode.proto KEYCODE_MEDIA_*) to the
+     * phone whose audio is currently playing. Targets the BACKGROUND
+     * session by default; falls back to ACTIVE for completeness.
+     */
+    public void sendMediaKey(int keycode) {
+        if (engineProxy == null) return;
+        SessionManager.SessionEntry target = sessionManager.getBackgroundSession();
+        if (target == null) target = sessionManager.getActiveSession();
+        if (target == null) {
+            Log.w(TAG, "sendMediaKey: no active/background session");
+            return;
+        }
+        try {
+            engineProxy.sendMediaKey(target.sessionId, keycode);
+        } catch (RemoteException e) {
+            Log.w(TAG, "sendMediaKey failed", e);
         }
     }
 

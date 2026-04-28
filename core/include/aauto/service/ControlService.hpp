@@ -38,6 +38,16 @@ public:
     void on_channel_open(uint8_t channel_id) override;
     void on_channel_close() override;
 
+    /// Send AudioFocus(LOSS) unsolicited — phone's media app receives
+    /// it and auto-pauses. Used when demoting a session out of the
+    /// background slot so its audio actually stops.
+    void release_audio_focus() override;
+
+    /// Send AudioFocus(GAIN) unsolicited — tells the phone the media
+    /// app may resume after a previous LOSS. Used when re-promoting
+    /// a previously-demoted session back to BACKGROUND/ACTIVE.
+    void gain_audio_focus() override;
+
     void set_session_close_callback(SessionCloseCallback cb) {
         session_close_cb_ = std::move(cb);
     }

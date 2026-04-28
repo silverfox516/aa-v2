@@ -130,14 +130,25 @@ public:
     using AudioDataCb = std::function<void(uint32_t session_id,
         uint32_t stream_type, const uint8_t* data, std::size_t size, int64_t ts)>;
     using VideoFocusCb = std::function<void(uint32_t session_id, bool projected)>;
+    using PlaybackStatusCb = std::function<void(uint32_t session_id,
+        int32_t state, const std::string& media_source,
+        uint32_t playback_seconds, bool shuffle, bool repeat, bool repeat_one)>;
+    using PlaybackMetadataCb = std::function<void(uint32_t session_id,
+        const std::string& song, const std::string& artist,
+        const std::string& album, const std::vector<uint8_t>& album_art,
+        uint32_t duration_seconds)>;
 
     AndroidServiceFactory(const engine::HeadunitConfig& config,
                           VideoDataCb video_cb, AudioDataCb audio_cb,
-                          VideoFocusCb focus_cb)
+                          VideoFocusCb focus_cb,
+                          PlaybackStatusCb playback_status_cb,
+                          PlaybackMetadataCb playback_metadata_cb)
         : hu_(config)
         , video_cb_(std::move(video_cb))
         , audio_cb_(std::move(audio_cb))
-        , focus_cb_(std::move(focus_cb)) {}
+        , focus_cb_(std::move(focus_cb))
+        , playback_status_cb_(std::move(playback_status_cb))
+        , playback_metadata_cb_(std::move(playback_metadata_cb)) {}
 
     std::map<int32_t, std::shared_ptr<service::IService>>
     create_services(service::SendMessageFn send_fn) override {
@@ -193,11 +204,33 @@ public:
         // Channel 7: Microphone source (stub)
         services[7] = std::make_shared<service::MicrophoneService>(send_fn);
 
-        // Channel 10: Media playback status — handlers parse and log
-        // PLAYBACK_STATUS / PLAYBACK_METADATA. Re-enabled 2026-04-27
-        // (was unregistered in troubleshooting #22 because its
-        // fill_config-only state was throttling video cadence).
-        services[10] = std::make_shared<service::MediaPlaybackService>(send_fn);
+        // Channel 10: Media playback status — handlers parse and forward
+        // to the app via AIDL callbacks (now wired to AaService).
+        // Re-enabled 2026-04-27 (was unregistered in troubleshooting #22).
+        {
+            auto playback_svc =
+                std::make_shared<service::MediaPlaybackService>(send_fn);
+            uint32_t sid = current_session_id_;
+            playback_svc->set_status_callback(
+                [this, sid](int32_t state, const std::string& source,
+                       uint32_t pos, bool shuffle, bool repeat, bool repeat_one) {
+                    if (playback_status_cb_) {
+                        playback_status_cb_(sid, state, source, pos,
+                                            shuffle, repeat, repeat_one);
+                    }
+                });
+            playback_svc->set_metadata_callback(
+                [this, sid](const std::string& song, const std::string& artist,
+                       const std::string& album,
+                       const std::vector<uint8_t>& album_art,
+                       uint32_t duration) {
+                    if (playback_metadata_cb_) {
+                        playback_metadata_cb_(sid, song, artist, album,
+                                              album_art, duration);
+                    }
+                });
+            services[10] = playback_svc;
+        }
 
         // Channels 8 / 9 / 11 / 12 / 13 / 14 (Nav / PhoneStatus /
         // Notification / MediaBrowser / Bluetooth / VendorExtension)
@@ -217,6 +250,8 @@ private:
     VideoDataCb video_cb_;
     AudioDataCb audio_cb_;
     VideoFocusCb focus_cb_;
+    PlaybackStatusCb playback_status_cb_;
+    PlaybackMetadataCb playback_metadata_cb_;
     uint32_t current_session_id_ = 0;
 };
 
@@ -268,6 +303,24 @@ int main(int /*argc*/, char* /*argv*/[]) {
         // Video focus callback
         [&aidl_raw](uint32_t sid, bool projected) {
             if (aidl_raw) aidl_raw->on_video_focus_changed(sid, projected);
+        },
+        // Playback status callback (channel 10 PLAYBACK_STATUS)
+        [&aidl_raw](uint32_t sid, int32_t state, const std::string& source,
+                    uint32_t pos, bool shuffle, bool repeat, bool repeat_one) {
+            if (aidl_raw) {
+                aidl_raw->on_playback_status(
+                    sid, state, source, pos, shuffle, repeat, repeat_one);
+            }
+        },
+        // Playback metadata callback (channel 10 PLAYBACK_METADATA)
+        [&aidl_raw](uint32_t sid, const std::string& song,
+                    const std::string& artist, const std::string& album,
+                    const std::vector<uint8_t>& album_art,
+                    uint32_t duration) {
+            if (aidl_raw) {
+                aidl_raw->on_playback_metadata(
+                    sid, song, artist, album, album_art, duration);
+            }
         }
     );
 

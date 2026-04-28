@@ -11,8 +11,10 @@
 #include <aap_protobuf/service/inputsource/message/TouchEvent.pb.h>
 #include <aap_protobuf/service/inputsource/message/PointerAction.pb.h>
 #include <aap_protobuf/service/inputsource/message/TouchScreenType.pb.h>
+#include <aap_protobuf/service/inputsource/message/KeyEvent.pb.h>
 #include <aap_protobuf/service/media/sink/message/KeyBindingRequest.pb.h>
 #include <aap_protobuf/service/media/sink/message/KeyBindingResponse.pb.h>
+#include <aap_protobuf/service/media/sink/message/KeyCode.pb.h>
 #include <aap_protobuf/shared/MessageStatus.pb.h>
 
 #include <chrono>
@@ -56,6 +58,33 @@ void InputService::send_touch(int32_t x, int32_t y, int32_t action) {
     ptr->set_y(static_cast<uint32_t>(y));
     ptr->set_pointer_id(0);
 
+    send(static_cast<uint16_t>(InputMessageType::InputReport), serialize(report));
+}
+
+void InputService::send_media_key(int32_t keycode) {
+    // Send a press+release pair on a single InputReport so the phone
+    // sees a complete key event. Keycode values come from
+    // aap_protobuf KeyCode.proto (KEYCODE_MEDIA_PLAY_PAUSE=85, etc.).
+    pb_input::InputReport report;
+    auto ts = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    report.set_timestamp(static_cast<uint64_t>(ts));
+
+    auto* key_event = report.mutable_key_event();
+    {
+        auto* down = key_event->add_keys();
+        down->set_keycode(static_cast<uint32_t>(keycode));
+        down->set_down(true);
+        down->set_metastate(0);
+    }
+    {
+        auto* up = key_event->add_keys();
+        up->set_keycode(static_cast<uint32_t>(keycode));
+        up->set_down(false);
+        up->set_metastate(0);
+    }
+
+    AA_LOG_I("%-18s %-24s keycode=%d", "input", "MEDIA_KEY", keycode);
     send(static_cast<uint16_t>(InputMessageType::InputReport), serialize(report));
 }
 

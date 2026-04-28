@@ -69,6 +69,15 @@ public:
     /// Forward touch event to input service(s).
     void send_touch_event(int32_t x, int32_t y, int32_t action);
 
+    /// Forward media-control key (KEYCODE_MEDIA_*) to input service.
+    void send_media_key(int32_t keycode);
+
+    /// Send AudioFocus(LOSS) on the control channel.
+    void release_audio_focus();
+
+    /// Send AudioFocus(GAIN) on the control channel.
+    void gain_audio_focus();
+
     /// Update session log tag (e.g., after phone is identified).
     void update_log_tag(const std::string& suffix);
     void set_video_focus(bool projected);

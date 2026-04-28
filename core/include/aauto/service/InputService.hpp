@@ -16,6 +16,7 @@ public:
     ServiceType type() const override { return ServiceType::InputSource; }
     void fill_config(aap_protobuf::service::ServiceConfiguration* config) override;
     void send_touch(int32_t x, int32_t y, int32_t action) override;
+    void send_media_key(int32_t keycode) override;
 
 private:
     InputServiceConfig input_config_;

@@ -31,7 +31,7 @@ MediaPlaybackService::MediaPlaybackService(SendMessageFn send_fn)
 
     register_handler(
         static_cast<uint16_t>(pb_mp::MEDIA_PLAYBACK_STATUS),
-        [](const uint8_t* data, std::size_t size) {
+        [this](const uint8_t* data, std::size_t size) {
             pb_mpm::MediaPlaybackStatus msg;
             if (!msg.ParseFromArray(data, static_cast<int>(size))) {
                 AA_LOG_W("%-18s %-24s parse failed (%zu bytes)",
@@ -47,19 +47,25 @@ MediaPlaybackService::MediaPlaybackService(SendMessageFn send_fn)
                      msg.shuffle()    ? 1 : 0,
                      msg.repeat()     ? 1 : 0,
                      msg.repeat_one() ? 1 : 0);
+            if (status_cb_) {
+                status_cb_(static_cast<int32_t>(msg.state()),
+                           msg.media_source(),
+                           msg.playback_seconds(),
+                           msg.shuffle(),
+                           msg.repeat(),
+                           msg.repeat_one());
+            }
         });
 
     register_handler(
         static_cast<uint16_t>(pb_mp::MEDIA_PLAYBACK_METADATA),
-        [](const uint8_t* data, std::size_t size) {
+        [this](const uint8_t* data, std::size_t size) {
             pb_mpm::MediaPlaybackMetadata msg;
             if (!msg.ParseFromArray(data, static_cast<int>(size))) {
                 AA_LOG_W("%-18s %-24s parse failed (%zu bytes)",
                          "media.playback", "PLAYBACK_METADATA", size);
                 return;
             }
-            // album_art is image bytes (PNG/JPEG, typically 50-90KB).
-            // Log size only — full content is not useful in the log.
             AA_LOG_I("%-18s %-24s song=\"%s\" artist=\"%s\" album=\"%s\""
                      " duration=%us album_art=%zuB rating=%d",
                      "media.playback", "PLAYBACK_METADATA",
@@ -69,6 +75,15 @@ MediaPlaybackService::MediaPlaybackService(SendMessageFn send_fn)
                      msg.duration_seconds(),
                      msg.album_art().size(),
                      msg.rating());
+            if (metadata_cb_) {
+                std::vector<uint8_t> art(msg.album_art().begin(),
+                                         msg.album_art().end());
+                metadata_cb_(msg.song(),
+                             msg.artist(),
+                             msg.album(),
+                             art,
+                             msg.duration_seconds());
+            }
         });
 }
 

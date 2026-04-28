@@ -113,6 +113,36 @@ void Engine::send_touch_event(uint32_t session_id,
     });
 }
 
+void Engine::send_media_key(uint32_t session_id, int32_t keycode) {
+    AA_LOG_I("send_media_key: session=%u keycode=%d", session_id, keycode);
+    asio::post(io_context_, [this, session_id, keycode] {
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            it->second->send_media_key(keycode);
+        }
+    });
+}
+
+void Engine::release_audio_focus(uint32_t session_id) {
+    AA_LOG_I("release_audio_focus: session=%u", session_id);
+    asio::post(io_context_, [this, session_id] {
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            it->second->release_audio_focus();
+        }
+    });
+}
+
+void Engine::gain_audio_focus(uint32_t session_id) {
+    AA_LOG_I("gain_audio_focus: session=%u", session_id);
+    asio::post(io_context_, [this, session_id] {
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            it->second->gain_audio_focus();
+        }
+    });
+}
+
 void Engine::set_video_focus(uint32_t session_id, bool projected) {
     AA_LOG_I("set_video_focus: session=%u projected=%d", session_id, projected);
     asio::post(io_context_, [this, session_id, projected] {

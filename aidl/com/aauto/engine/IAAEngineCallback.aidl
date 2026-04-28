@@ -35,4 +35,23 @@ interface IAAEngineCallback {
 
     /** Phone requested video focus change (e.g., "exit" button pressed). */
     void onVideoFocusChanged(int sessionId, boolean projected);
+
+    /**
+     * Media playback status from phone (channel 10).
+     * Phone broadcasts this every ~1s while playing — pos increments,
+     * state transitions PAUSED/PLAYING/STOPPED, etc.
+     * @param state 0=unknown, 1=STOPPED, 2=PLAYING, 3=PAUSED
+     */
+    oneway void onPlaybackStatus(int sessionId, int state, String mediaSource,
+                                 int playbackSeconds, boolean shuffle,
+                                 boolean repeat, boolean repeatOne);
+
+    /**
+     * Media playback metadata from phone (channel 10).
+     * Sent on track change / playback start. albumArt is PNG/JPEG bytes
+     * (typically 3KB-90KB depending on the album).
+     */
+    oneway void onPlaybackMetadata(int sessionId, String song, String artist,
+                                   String album, in byte[] albumArt,
+                                   int durationSeconds);
 }

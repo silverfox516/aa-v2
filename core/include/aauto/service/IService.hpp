@@ -64,6 +64,18 @@ public:
     /// Send touch event. Only meaningful for input services.
     virtual void send_touch(int32_t /*x*/, int32_t /*y*/, int32_t /*action*/) {}
 
+    /// Send a media-control key (KEYCODE_MEDIA_*). Only meaningful for
+    /// input services (the input channel carries InputReport.key_event).
+    virtual void send_media_key(int32_t /*keycode*/) {}
+
+    /// Send AudioFocus(LOSS). Only meaningful for the control service.
+    virtual void release_audio_focus() {}
+
+    /// Send AudioFocus(GAIN) unsolicited. Tells the phone its media
+    /// app may resume — needed because release_audio_focus() pauses
+    /// the phone, and re-promoting a session must explicitly reverse it.
+    virtual void gain_audio_focus() {}
+
     /// Set video focus. Only meaningful for video services.
     virtual void set_video_focus(bool /*projected*/) {}
 

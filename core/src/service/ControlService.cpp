@@ -206,6 +206,26 @@ void ControlService::on_channel_close() {
     ServiceBase::on_channel_close();
 }
 
+void ControlService::release_audio_focus() {
+    AA_LOG_I("%-18s %-24s -> LOSS (unsolicited)",
+             "control", "AUDIO_FOCUS_NOTIF");
+    pb_ctrl::AudioFocusNotification notif;
+    notif.set_focus_state(pb_ctrl::AUDIO_FOCUS_STATE_LOSS);
+    notif.set_unsolicited(true);
+    send(static_cast<uint16_t>(ControlMessageType::AudioFocusNotification),
+         serialize(notif));
+}
+
+void ControlService::gain_audio_focus() {
+    AA_LOG_I("%-18s %-24s -> GAIN (unsolicited)",
+             "control", "AUDIO_FOCUS_NOTIF");
+    pb_ctrl::AudioFocusNotification notif;
+    notif.set_focus_state(pb_ctrl::AUDIO_FOCUS_STATE_GAIN);
+    notif.set_unsolicited(true);
+    send(static_cast<uint16_t>(ControlMessageType::AudioFocusNotification),
+         serialize(notif));
+}
+
 void ControlService::send_service_discovery_response() {
     pb_ctrl::ServiceDiscoveryResponse resp;
     resp.set_display_name(hu_config_.display_name);

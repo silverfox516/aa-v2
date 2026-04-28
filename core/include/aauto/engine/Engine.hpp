@@ -73,6 +73,9 @@ public:
     void detach_all_sinks(uint32_t session_id) override;
     void send_touch_event(uint32_t session_id,
                           int32_t x, int32_t y, int32_t action) override;
+    void send_media_key(uint32_t session_id, int32_t keycode) override;
+    void release_audio_focus(uint32_t session_id) override;
+    void gain_audio_focus(uint32_t session_id) override;
 
     /// Run event loop. Blocks until shutdown().
     void run(unsigned int thread_count = 1);

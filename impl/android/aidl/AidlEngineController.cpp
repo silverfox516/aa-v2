@@ -133,6 +133,22 @@ android::binder::Status AidlEngineController::sendTouchEvent(
     return android::binder::Status::ok();
 }
 
+android::binder::Status AidlEngineController::sendMediaKey(
+        int32_t sessionId, int32_t keycode) {
+    engine_->send_media_key(static_cast<uint32_t>(sessionId), keycode);
+    return android::binder::Status::ok();
+}
+
+android::binder::Status AidlEngineController::releaseAudioFocus(int32_t sessionId) {
+    engine_->release_audio_focus(static_cast<uint32_t>(sessionId));
+    return android::binder::Status::ok();
+}
+
+android::binder::Status AidlEngineController::gainAudioFocus(int32_t sessionId) {
+    engine_->gain_audio_focus(static_cast<uint32_t>(sessionId));
+    return android::binder::Status::ok();
+}
+
 android::binder::Status AidlEngineController::setVideoFocus(
         int32_t sessionId, bool projected) {
     AA_LOG_I("setVideoFocus: session=%d projected=%d", sessionId, projected);
@@ -248,6 +264,42 @@ void AidlEngineController::on_video_focus_changed(
         callback_->onVideoFocusChanged(
             static_cast<int32_t>(session_id), projected);
     }
+}
+
+void AidlEngineController::on_playback_status(
+        uint32_t session_id,
+        int32_t state,
+        const std::string& media_source,
+        uint32_t playback_seconds,
+        bool shuffle,
+        bool repeat,
+        bool repeat_one) {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (callback_ == nullptr) return;
+    callback_->onPlaybackStatus(
+        static_cast<int32_t>(session_id),
+        state,
+        android::String16(media_source.c_str()),
+        static_cast<int32_t>(playback_seconds),
+        shuffle, repeat, repeat_one);
+}
+
+void AidlEngineController::on_playback_metadata(
+        uint32_t session_id,
+        const std::string& song,
+        const std::string& artist,
+        const std::string& album,
+        const std::vector<uint8_t>& album_art,
+        uint32_t duration_seconds) {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (callback_ == nullptr) return;
+    callback_->onPlaybackMetadata(
+        static_cast<int32_t>(session_id),
+        android::String16(song.c_str()),
+        android::String16(artist.c_str()),
+        android::String16(album.c_str()),
+        album_art,
+        static_cast<int32_t>(duration_seconds));
 }
 
 } // namespace aauto::impl

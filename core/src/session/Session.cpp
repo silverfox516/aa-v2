@@ -133,6 +133,24 @@ void Session::send_touch_event(int32_t x, int32_t y, int32_t action) {
     }
 }
 
+void Session::send_media_key(int32_t keycode) {
+    for (auto& [ch, svc] : services_) {
+        svc->send_media_key(keycode);
+    }
+}
+
+void Session::release_audio_focus() {
+    for (auto& [ch, svc] : services_) {
+        svc->release_audio_focus();
+    }
+}
+
+void Session::gain_audio_focus() {
+    for (auto& [ch, svc] : services_) {
+        svc->gain_audio_focus();
+    }
+}
+
 // ===== Send =====
 
 void Session::send_message(uint8_t channel_id, uint16_t message_type,

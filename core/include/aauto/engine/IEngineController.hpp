@@ -4,6 +4,7 @@
 #include <functional>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace aauto::engine {
 
@@ -44,6 +45,26 @@ public:
 
     /// Phone requested video focus change (exit button, etc.)
     virtual void on_video_focus_changed(uint32_t session_id, bool projected) = 0;
+
+    /// Playback status from media.playback channel (10).
+    /// Default empty implementation so existing test mocks don't need
+    /// updating until they care about playback.
+    virtual void on_playback_status(uint32_t /*session_id*/,
+                                    int32_t /*state*/,
+                                    const std::string& /*media_source*/,
+                                    uint32_t /*playback_seconds*/,
+                                    bool /*shuffle*/,
+                                    bool /*repeat*/,
+                                    bool /*repeat_one*/) {}
+
+    /// Playback metadata from media.playback channel (10).
+    /// Default empty implementation; see on_playback_status note.
+    virtual void on_playback_metadata(uint32_t /*session_id*/,
+                                      const std::string& /*song*/,
+                                      const std::string& /*artist*/,
+                                      const std::string& /*album*/,
+                                      const std::vector<uint8_t>& /*album_art*/,
+                                      uint32_t /*duration_seconds*/) {}
 };
 
 /// Driving port: app -> engine commands.
@@ -84,6 +105,18 @@ public:
     /// Attach/detach ALL sinks (video + audio). Used for session switching.
     virtual void attach_all_sinks(uint32_t session_id) = 0;
     virtual void detach_all_sinks(uint32_t session_id) = 0;
+
+    /// Send a media-control KeyEvent (KEYCODE_MEDIA_*) via the input
+    /// channel. Used for play/pause/next/prev buttons on the HU UI.
+    virtual void send_media_key(uint32_t session_id, int32_t keycode) = 0;
+
+    /// Send AudioFocus(LOSS) on the control channel. Phone's media
+    /// app receives this as a focus loss and auto-pauses.
+    virtual void release_audio_focus(uint32_t session_id) = 0;
+
+    /// Send AudioFocus(GAIN). Used after release_audio_focus to allow
+    /// the phone's media app to resume playback.
+    virtual void gain_audio_focus(uint32_t session_id) = 0;
 };
 
 } // namespace aauto::engine
