@@ -1,9 +1,14 @@
 # 0005 — MediaBrowser channel
 
 > Created: 2026-04-28
-> Status: **ON HOLD (2026-04-28)** — Day 1 attempted, phone refused to
-> open the channel across multiple apps. Service code kept in tree as
-> future starting point but unregistered in main.cpp.
+> Status: **DEPRECATED-IN-MODERN-AA (2026-04-29)** — re-investigation
+> with Spotify installed confirmed the legacy AAP MediaBrowser channel
+> (ch12) is effectively unused by modern Android Auto. The phone
+> never opens the channel regardless of installed media app, because
+> apps now use the androidx.car.app library: the phone renders the
+> browse UI itself and projects it via the video sink (ch1). HU does
+> not receive track-list data on a separate channel anymore. Service
+> code retained as a fallback path / learning artifact.
 > Related decisions: G.1 (refresh — phone-side refusal observation),
 > F.20 (재생 명령은 KEYCODE via Input ch — MediaBrowser는 곡 *선택*만
 > 담당, 재생 토글과 분리)
@@ -241,3 +246,120 @@ HU <--PLAYBACK_STATUS / METADATA (자동 재생 시작)----------------- Phone
 | **총** | | **14~20h** |
 
 각 Day별 별도 commit 권장. Day 1만으로도 학습 산출물 1차 회수.
+
+---
+
+## 2026-04-29 재투자 — 결론: legacy 채널 deprecated
+
+User local에 gearhead.apk + gmscore base.apk decompile (plan 0007 작업의
+부산물)이 준비된 상태에서 ch12 거부 root cause 재조사. 동시에 폰에
+Spotify 설치하고 재테스트.
+
+### 가설 검증 흐름
+
+**가설 A — phone에 car-compatible MediaBrowser app 없음**:
+
+- 이전 테스트 환경: YT Music만 설치
+- YT Music dumpsys 검사: `com.google.android.gms.car.application` 메타데이터
+  grep hit 없음 (단 dumpsys 출력 한계)
+- 다른 음악 앱 (Spotify/Pocket Casts/Audible/TuneIn/Pandora) 0개 설치 확인
+  (`adb shell pm list packages | grep ...`)
+- → "car-compat 앱 부재가 ch12 안 여는 직접 원인" 가설로 진입
+
+**검증 — Spotify 설치 후 재테스트**:
+
+Spotify 설치 후 dumpsys 확인:
+```
+android.media.browse.MediaBrowserService: SpotifyMediaBrowserService,
+                                          SpotifyMediaLibraryService
+androidx.car.app.media.MEDIA_SHOW_PLAYBACK_VIEW: ...
+com.spotify.carapplibrary.androidauto.AndroidAutoService
+```
+
+Spotify는 다음 둘 다 가짐:
+- legacy `android.media.browse.MediaBrowserService` action
+- modern `androidx.car.app` library (Car App Library)
+
+main.cpp에 `services[12] = MediaBrowserService` 다시 등록 + Day 1 hook
+(auto-request root on channel_open) 재추가 + 빌드 + 실기 테스트.
+
+**관찰된 logcat (요약)**:
+
+```
+[AAP TX] control SERVICE_DISCOVERY_RESP 229 bytes
+  ← MediaBrowser advertise 정상 ("media browser service configured" log)
+
+[AAP RX] CHANNEL_OPEN_REQ 8개:
+  video, audio.media, audio.guidance, audio.system,
+  input, sensor, microphone, media.playback
+  ← media.browser CHANNEL_OPEN_REQ **여전히 안 옴**
+
+이후 PLAYBACK_STATUS source가 "Samsung Music" → "Spotify"로 전환
+  ← Spotify가 phone-side에서 실제 동작 중인데도 ch12 안 열림
+```
+
+**가설 A 폐기**: Spotify가 깔려있고 active이지만 phone은 ch12 안 엶.
+
+### 새 가설 — legacy AAP MediaBrowser 채널 deprecated
+
+**관찰**:
+- 다른 모든 advertise 채널은 정상 open → HU identity 게이팅 아님
+- Spotify의 `androidx.car.app` (Car App Library) action 존재
+- AAP wire layer는 dynamic-loaded module에 있음 (plan 0007 결론)
+
+**가설**: Modern Android Auto는 미디어 brows를 다음 모델로 바꿈:
+1. 앱이 `androidx.car.app.CarAppService`(Car App Library) 구현
+2. 폰이 그 앱의 browse UI 자체를 렌더링
+3. 폰이 그 렌더된 UI를 video sink (ch1)로 HU에 projecting
+4. HU는 그냥 비디오로 표시 → 사용자가 그 안에서 browse
+5. **별도 ch12 MediaBrowser 채널 사용 안 함**
+
+웹 검증 (Android developer docs):
+> "If a user has an older version of Android Auto installed or cannot
+> use the Car App Library version, the host will fall back to the
+> MediaBrowserService implementation."
+
+→ 우리 가설 confirmed. 모던 AA는 Car App Library 우선, legacy
+MediaBrowser는 fallback only. 폰이 Car App Library 경로로 가면 HU
+측 ch12 advertise는 무시.
+
+**최종 결론**:
+
+- 학습 목표 "ch12로 곡 리스트 받기"는 **modern Android Auto 환경에서
+  achievable하지 않음**.
+- 곡 리스트는 phone-rendered UI 일부로 video sink (ch1)에 픽셀로
+  projecting되는 게 표준. HU 측에서 *데이터로* 추출 불가.
+- legacy ch12는 deprecated path — older AA 버전이나 Car App Library
+  미사용 앱에서만 fallback으로 활성. Spotify/YT Music 등 주요 앱은
+  이미 Car App Library로 마이그레이션.
+
+### 코드/문서 정리
+
+- `services[12]` 등록 제거 (다시 disabled)
+- `MediaBrowserService::on_channel_open` Day 1 hook 제거
+- `MediaBrowserService.hpp` header 상태 update — DEPRECATED-IN-MODERN-AA
+- service 코드 자체는 tree에 유지 (older AA / 미마이그레이션 앱
+  fallback 시 재활성 가능)
+
+### 학습 산출물
+
+목표 미달성이지만 학습 가치 있는 사실 확인:
+
+1. AAP의 legacy 채널이 modern Android Auto에서 deprecated됨을 정량적
+   확인 — 다른 채널 모두 열리는데 ch12만 안 열린다는 결정적 증거
+2. Modern Android Auto의 미디어 모델 = phone-rendered UI projection
+   via video sink. HU는 "dumb display" 역할
+3. F.20 (KEYCODE) 결정의 전략적 의미 추가 정당화 — legacy AAP는
+   변동성 높은 영역, KEYCODE는 OS 표준이라 안정적
+4. AAP 포팅 학습 측면 — modern AAP를 단순히 "channels open + protocol"
+   로 보면 안 되고, 어느 채널이 deprecated인지 인지 필수
+5. `androidx.car.app.CarAppService` 패턴이 다음 학습 후보 — phone-side
+   wire 분석 시 video 채널 안의 input/event 흐름 (touch, key) 관찰
+   가치 큼
+
+### 미래 trigger (재오픈 조건)
+
+- Older Android Auto 버전(예: 5.x 이하)에서 동작 검증 필요 시
+- Car App Library 미사용 + MediaBrowserService 단독 앱(예: 일부 podcast
+  앱)에서 ch12가 활성화되는지 직접 확인 시
+- Google이 fallback 자체를 제거하는 발표가 나오면 본 결론 closed

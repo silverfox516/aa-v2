@@ -261,11 +261,14 @@ public:
         // learning target. See architecture_review.md G.0 for the
         // policy and G.1 / G.2 / G.3 / G.3a for per-channel reasons.
         //
-        // MediaBrowser (ch12) note: Day 1 attempted 2026-04-28 with full
-        // handler set + auto-request hook. Phone refused to open the
-        // channel (verified across multiple apps incl. YT Music; other
-        // apps tested by user). On hold — see 0005 plan / G.1 for
-        // findings. Service code stays in tree as future starting point.
+        // MediaBrowser (ch12) re-test 2026-04-29 with Spotify installed:
+        // phone STILL did not open ch12. Investigation concluded the
+        // legacy AAP MediaBrowser channel is effectively deprecated in
+        // modern Android Auto — apps now use androidx.car.app library
+        // (Car App Library), the phone renders the browse UI itself
+        // and projects it via the video sink (ch1). The HU never
+        // receives track-list data over a separate channel anymore.
+        // See plan 0005 for the full investigation chain.
 
         return services;
     }

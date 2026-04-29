@@ -12,18 +12,21 @@ namespace aauto::service {
 /// Media browser channel — phone exposes its media library tree
 /// (Spotify playlists, on-device music, ...). HU is the browser client.
 ///
-/// Status: ON HOLD (2026-04-28). Day 1 attempt registered all four
-/// handlers + auto-request hook + advertised the channel via
-/// fill_config. Phone (Nothing A001 / SM-N981N) refused to open the
-/// channel — verified across YouTube Music and other media apps.
-/// Service code is kept in tree as a future starting point so the
-/// proto wiring + handler skeleton don't have to be re-derived. See
-/// docs/plans/0005_media_browser.md and architecture_review.md G.1.
+/// Status: DEPRECATED-IN-MODERN-AA (2026-04-29). The legacy AAP
+/// MediaBrowser channel (ch12, MEDIA_ROOT_NODE/SOURCE_NODE/etc.) is
+/// not opened by modern Android Auto host anymore. Tests across
+/// multiple apps (YouTube Music, Spotify) all show the phone never
+/// sends CHANNEL_OPEN_REQ for ch12 — even with Spotify, which has
+/// both the legacy MediaBrowserService and the newer
+/// androidx.car.app library. Modern AA uses Car App Library: the
+/// phone renders the browse UI itself and projects it via the video
+/// sink (ch1). The HU never receives track-list data on a separate
+/// channel.
 ///
-/// To re-attempt: register `services[12] = make_shared<MediaBrowserService>(send_fn)`
-/// in main.cpp's create_services. Add a Day 1 observation hook (e.g.,
-/// auto-request root on channel_open) only after confirming the channel
-/// actually opens.
+/// Service code stays in tree as a learning artifact and a fallback
+/// path in case an older Android Auto version or a bare-bones
+/// MediaBrowserService-only app needs to interoperate. See
+/// docs/plans/0005_media_browser.md for the full investigation chain.
 ///
 /// Inbound (Phone → HU):
 ///   - MEDIA_ROOT_NODE   (32769): { path, sources[] }
