@@ -34,15 +34,41 @@ User local에서 APK pull + jadx decompile + collaborative analysis 진행한
 
 ### inx 서브클래스 전체 매핑 (AAP 채널 핸들러 base class)
 
-| 클래스 | service type | 정체 | 비고 |
-|--------|-------------|------|------|
-| imh.java | 1 | (제어, msg 65535) | InputControl으로 추정 |
-| ino.java | 10 | **NavigationStatus** | INSTRUMENT_CLUSTER_START/STOP/STATE 등 처리. **별도 작업 시 재참조 가치 큼** |
-| hyi.java | 16 | (미상) | 32769~32772 케이스 없음 |
-| ilb.java | 19 | CarControl | CAR_CONTROL_GET/SET_PROPERTY (vehicle HVAC, etc) |
-| ilg.java | 20 | CarLocalMedia | HU의 로컬 미디어 (radio/USB), AAP MediaPlayback 아님 |
+총 17개 inx 서브클래스를 발견 + 매핑:
 
-**MediaPlayback 핸들러는 gearhead.apk inx 서브클래스 중에 존재하지 않는다.**
+| 클래스 | service type | 정체 / 로그 태그 | 메시지 ID 범위 |
+|--------|-------------|-----------------|---------------|
+| imh.java | 1 | (control, msg 65535) | 65535 |
+| ipw.java | 6 | CAR.GAL.MIC (Microphone) | - |
+| iok.java | 7 | CAR.GAL.SENSOR | - |
+| inf.java | 8 | CAR.GAL.INPUT | - |
+| ino.java | 10 | **NavigationStatus** (CarInstrumentClusterInfo) | 32769/32770 = INST_CLUSTER_START/STOP, 32773 = NAV_DISTANCE |
+| inj.java | 11 | CAR.GAL.INST (instrument) | - |
+| inv.java | 13 | CAR.GAL.INST (instrument) | - |
+| ioh.java | 15 | CAR.GAL.RADIO | 32794~32799 |
+| hyi.java | 16 | (미상) | - |
+| ior.java | 16 | (미상, hyi와 같은 service id) | - |
+| iot.java | 17 | CAR.GAL.WIFI_PROJ | - |
+| ilb.java | 19 | CarControl (CAR_CONTROL_GET/SET_PROPERTY) | 32770/32772/32773/32775 |
+| ilg.java | 20 | CarLocalMedia (HU radio/USB, AAP MediaPlayback **아님**) | 32769~32771 |
+| fgq.java | (special) | (super(20, 21) — non-standard) | - |
+| ioz.java | 21 | (미상) | - |
+| iqg.java | (no super match) | (constructor 패턴 다름) | - |
+| iql.java | (no super match) | (constructor 패턴 다름) | - |
+
+추가로 `ipy.java` = abstract MediaSource base class 발견:
+- 32768 = MEDIA_SETUP (outbound)
+- 32769 = MEDIA_START (outbound)
+- 32770 = MEDIA_STOP (outbound)
+- 32772 = MEDIA_CONFIG (inbound, parses `wsz`)
+- 32773 = MEDIA_ACK (inbound, parses `wrh`)
+- 32788 = MEDIA_FOCUS (?)
+
+`ipy`는 video/audio data 채널 송신 base — phone이 HU에게 미디어 데이터 흘림.
+우리가 advertising하는 MediaSinkService(video/audio sink) 의 phone-side 짝.
+
+**MediaPlayback (PLAYBACK_STATUS/INPUT/METADATA, msg 32769~32771) 핸들러는
+17개 inx 서브클래스 그 어디에도 존재하지 않는다.**
 
 ### 가능한 원인 (미검증)
 
