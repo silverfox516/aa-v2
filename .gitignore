@@ -5,3 +5,10 @@ build/
 *.swo
 *~
 .DS_Store
+
+# Decompiled APK output trees from plan 0007 reverse-engineering work
+# (very large — gearhead-decompiled ~26GB, gmscore-decompiled larger).
+# Findings are summarized in docs/plans/0007_proto_reverse_engineering.md.
+gearhead-decompiled/
+gmscore-decompiled/
+*.apk
