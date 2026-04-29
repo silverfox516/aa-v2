@@ -106,6 +106,22 @@ CHANNEL_OPEN: ch=1 (video)
     (troubleshooting #4; F.17 round-trip verified)
 ```
 
+### Cluster Display (ch 15 — ON HOLD, secondary sink)
+
+별도 인스턴스의 MediaSinkService를 `display_type=CLUSTER`로 advertise해서
+계기판 보조 디스플레이용 video 채널을 노출하려는 시도. 메시지 ID 자체는
+ch1과 동일 (MediaSinkService 재사용). plan 0006 Day 2에서 검증한 결과:
+
+- **MAIN + CLUSTER 동시 advertise**: 폰이 SDR 받고도 어떤 채널도
+  CHANNEL_OPEN_REQ 보내지 않고 ~1초 후 connection close. distinct
+  `display_id` (main=0, cluster=1) 적용해도 동일.
+- **CLUSTER 단독 (MAIN을 CLUSTER로 변경)**: 같은 거부.
+- **결론 (F.21)**: AAP host는 최소 1개 MAIN sink advertise를 요구함.
+  CLUSTER는 항상 MAIN에 *additive*로만. 또한 일반 폰/앱(Spotify/YT
+  Music + 비인증 HU)에서는 cluster sink 자체가 무시됨 — 인증된 OEM
+  HU identity 또는 androidx.car.app cluster 모델 필요.
+- **자세한 내용**: docs/plans/0006_cluster_display.md, architecture_review.md F.21.
+
 ### Input Channel (ch 5) — KEY_BINDING은 Input 채널에서 처리
 
 | ID | Message | Direction | Phase | Trigger | Role | Status | Verified |
@@ -273,23 +289,26 @@ HU는 unhandled 로그만.
 
 ---
 
-## Media Browser (ch 12 — ON HOLD, phone refuses to open)
+## Media Browser (ch 12 — DEPRECATED-IN-MODERN-AA)
 
 | ID | Message | Direction | Phase | Trigger | Role | Status | Verified |
 |----|---------|-----------|-------|---------|------|--------|----------|
-| 32769 | ROOT_NODE | Phone → HU | runtime | after GET_NODE(root) | 미디어 브라우저 루트 노드 | ⬜ 미관찰 (폰이 채널 안 엶) | |
+| 32769 | ROOT_NODE | Phone → HU | runtime | after GET_NODE(root) | 미디어 브라우저 루트 노드 | ⬜ 미관찰 (modern AA에서 채널 deprecated) | |
 | 32770 | SOURCE_NODE | Phone → HU | runtime | after GET_NODE(source) | 미디어 소스 목록 | ⬜ 미관찰 | |
 | 32771 | LIST_NODE | Phone → HU | runtime | after GET_NODE(list) | 폴더/재생목록 | ⬜ 미관찰 | |
 | 32772 | SONG_NODE | Phone → HU | runtime | after GET_NODE(song) | 개별 곡 정보 | ⬜ 미관찰 | |
-| 32773 | GET_NODE | HU → Phone | runtime | user browses | 노드 탐색 요청 | ⬜ 송신 시도 안 됨 (채널 안 열림) | |
+| 32773 | GET_NODE | HU → Phone | runtime | user browses | 노드 탐색 요청 | ⬜ 송신 시도 안 됨 | |
 | 32774 | BROWSE_INPUT | HU → Phone | runtime | search input | 브라우징 입력 | ⬜ 송신 시도 안 됨 | |
 
-2026-04-28 Day 1 시도: 4개 핸들러 + auto-request hook + advertise 모두
-구현. 폰(Nothing A001 / SM-N981N)이 SERVICE_DISCOVERY_RESPONSE 받고도
-ch12 CHANNEL_OPEN_REQ를 송신하지 않음. YT Music + 다른 미디어 앱
-모두 동일. ch12만 폰이 열지 않는 유일한 채널 (ch1~7, ch10은 정상).
-Service code는 트리에 유지 (재시도 시 재사용). 자세한 시도 + 가설 +
-재시도 트리거: docs/plans/0005_media_browser.md, architecture_review.md G.1.
+2026-04-28 / 2026-04-29 두 차례 시도. 첫 시도(YT Music만 설치) 폰이
+ch12 CHANNEL_OPEN_REQ 미전송. Spotify(car-compat 인증 앱) 설치 후
+재테스트도 동일. 다른 모든 advertise 채널(ch1~7, ch10)은 정상 open
+→ HU identity 게이팅이 아닌 채널-specific 거부. 결론: legacy AAP
+MediaBrowser 채널은 modern Android Auto에서 deprecated. 모던 미디어
+앱들은 androidx.car.app(Car App Library) 사용 → 폰이 brows UI를
+직접 렌더링해서 video sink(ch1)로 projecting → HU는 dumb display
+역할. 자세한 시도 + 결론: docs/plans/0005_media_browser.md,
+architecture_review.md G.1.
 
 ---
 
