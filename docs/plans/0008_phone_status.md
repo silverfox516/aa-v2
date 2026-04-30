@@ -1,7 +1,9 @@
 # 0008 — PhoneStatus channel (통화 시그널링)
 
 > Created: 2026-04-29
-> Status: PLANNING
+> Status: Day 1 PASSED (2026-04-30) — ch9 살아있음 확인. PHONE_STATUS
+> 메시지 idle 상태에서 calls=0/signal=0 송신 관찰. 통화 트리거 시
+> 추가 메시지 흐름 검증은 Day 2 (UI 배너 + AIDL chain)에서 진행.
 > Related decisions: G.0 (passive handler rule), F.20 (KEYCODE-only
 > 미디어 제어와 같은 패턴 — non-AAP 라우팅), G.1 (MediaBrowser
 > deprecation 패턴 — 본 plan에서도 같은 운명일 위험)

@@ -253,13 +253,30 @@ public:
             services[10] = playback_svc;
         }
 
-        // Channels 8 / 9 / 11 / 12 / 13 / 14 (Nav / PhoneStatus /
-        // Notification / MediaBrowser / Bluetooth / VendorExtension)
-        // remain unregistered. Their service classes are still in-tree
-        // (fill_config documents the proto layout) — re-register here
-        // with real response handlers when each channel becomes a
-        // learning target. See architecture_review.md G.0 for the
-        // policy and G.1 / G.2 / G.3 / G.3a for per-channel reasons.
+        // Channel 9: Phone status — Day 1 of plan 0008. Passive
+        // handler (parse + log + callback). Java callback wiring
+        // deferred to Day 2; for Day 1 we just observe whether the
+        // phone sends PHONE_STATUS messages at all (could be
+        // deprecated like ch12, see G.1).
+        services[9] = std::make_shared<service::PhoneStatusService>(send_fn);
+
+        // Channel 13: Bluetooth — Day 1 of plan 0009. Passive
+        // observation: parse PAIRING_REQUEST and AUTH_DATA but do
+        // NOT auto-respond. Auto-responding SUCCESS without actually
+        // pairing via Bluedroid would mislead the phone (it would
+        // assume HFP is available when it isn't). The send_*
+        // outbound APIs exist on the service for Day 2/3 once a
+        // Bluedroid bridge is in place.
+        services[13] = std::make_shared<service::BluetoothService>(
+            send_fn, hu_.bluetooth_mac);
+
+        // Channels 8 / 11 / 12 / 14 (Nav / Notification / MediaBrowser /
+        // VendorExtension) remain unregistered. Their service classes
+        // are still in-tree (fill_config documents the proto layout)
+        // — re-register here with real response handlers when each
+        // channel becomes a learning target. See architecture_review.md
+        // G.0 for the policy and G.1 / G.3 / G.3a for per-channel
+        // reasons.
         //
         // MediaBrowser (ch12) re-test 2026-04-29 with Spotify installed:
         // phone STILL did not open ch12. Investigation concluded the

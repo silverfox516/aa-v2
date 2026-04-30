@@ -86,6 +86,24 @@ inline const char* mediabrowser_msg_name(uint16_t type) {
     }
 }
 
+inline const char* phonestatus_msg_name(uint16_t type) {
+    switch (type) {
+        case 32769: return "PHONE_STATUS";
+        case 32770: return "PHONE_STATUS_INPUT";
+        default:    return nullptr;
+    }
+}
+
+inline const char* bluetooth_msg_name(uint16_t type) {
+    switch (type) {
+        case 32769: return "PAIRING_REQUEST";
+        case 32770: return "PAIRING_RESPONSE";
+        case 32771: return "AUTH_DATA";
+        case 32772: return "AUTH_RESULT";
+        default:    return nullptr;
+    }
+}
+
 /// Format a message type as a readable string for the given channel.
 ///
 /// CHANNEL_AWARE: AAP message ids are scoped per channel. Control-channel
@@ -107,6 +125,11 @@ inline const char* msg_type_name(uint8_t channel, uint16_t type) {
             if (n) return n;
             break;
         }
+        case 9: {
+            auto n = phonestatus_msg_name(type);
+            if (n) return n;
+            break;
+        }
         case 10: {
             auto n = mediaplayback_msg_name(type);
             if (n) return n;
@@ -114,6 +137,11 @@ inline const char* msg_type_name(uint8_t channel, uint16_t type) {
         }
         case 12: {
             auto n = mediabrowser_msg_name(type);
+            if (n) return n;
+            break;
+        }
+        case 13: {
+            auto n = bluetooth_msg_name(type);
             if (n) return n;
             break;
         }
