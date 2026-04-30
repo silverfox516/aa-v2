@@ -59,4 +59,26 @@ interface IAAEngineCallback {
     oneway void onPlaybackMetadata(int sessionId, String song, String artist,
                                    String album, in byte[] albumArt,
                                    String playlist, int durationSeconds);
+
+    /**
+     * Phone wants to pair its Bluetooth radio with the head unit
+     * (channel 13 PAIRING_REQUEST). The app should turn the BT
+     * adapter on if needed, call BluetoothDevice.createBond on the
+     * given phone address, then complete the negotiation by calling
+     * IAAEngine.completePairing(sessionId, status, alreadyPaired).
+     * @param phoneAddress Bluetooth MAC of the phone (AA:BB:CC:DD:EE:FF).
+     * @param method matches BluetoothPairingMethod proto:
+     *               -1=UNAVAILABLE, 1=OOB, 2=NUMERIC_COMPARISON,
+     *               3=PASSKEY_ENTRY, 4=PIN.
+     */
+    oneway void onPairingRequest(int sessionId, String phoneAddress, int method);
+
+    /**
+     * Phone supplied authentication data for the pairing in progress
+     * (channel 13 AUTHENTICATION_DATA) — typically a PIN string the
+     * head unit should feed into BluetoothDevice.setPin or compare
+     * against the passkey shown by the OS. The app finishes the
+     * exchange with IAAEngine.completeAuth(sessionId, status).
+     */
+    oneway void onAuthData(int sessionId, String authData, int method);
 }

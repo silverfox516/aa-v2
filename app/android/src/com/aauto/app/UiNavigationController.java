@@ -1,6 +1,5 @@
 package com.aauto.app;
 
-import android.app.TaskStackBuilder;
 import android.content.Context;
 import android.content.Intent;
 
@@ -19,9 +18,17 @@ class UiNavigationController {
     }
 
     void showDisplayFlow() {
-        TaskStackBuilder.create(context)
-                .addNextIntent(new Intent(context, DeviceListActivity.class))
-                .addNextIntent(new Intent(context, AaDisplayActivity.class))
-                .startActivities();
+        // singleTask + REORDER_TO_FRONT: reuse the existing
+        // AaDisplayActivity if one is already showing (e.g. during a
+        // wireless->USB transport switch on the same phone). Without
+        // REORDER_TO_FRONT, the system would relaunch the activity and
+        // its SurfaceView would be destroyed/recreated mid-stream,
+        // racing with incoming video frames. Manifest declares
+        // AaDisplayActivity launchMode=singleTask so a single instance
+        // is reused across activateSession() calls.
+        Intent display = new Intent(context, AaDisplayActivity.class);
+        display.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+        context.startActivity(display);
     }
 }

@@ -1,6 +1,7 @@
 #define LOG_TAG "AA.Session"
 
 #include "aauto/session/Session.hpp"
+#include "aauto/service/BluetoothService.hpp"
 #include "aauto/utils/Logger.hpp"
 #include "aauto/utils/ProtobufCompat.hpp"
 #include "aauto/utils/ProtocolUtil.hpp"
@@ -149,6 +150,25 @@ void Session::gain_audio_focus() {
     for (auto& [ch, svc] : services_) {
         svc->gain_audio_focus();
     }
+}
+
+void Session::complete_pairing(int32_t status, bool already_paired) {
+    auto* bt = find_bluetooth_service();
+    if (bt) bt->send_pairing_response(status, already_paired);
+}
+
+void Session::complete_auth(int32_t status) {
+    auto* bt = find_bluetooth_service();
+    if (bt) bt->send_auth_result(status);
+}
+
+service::BluetoothService* Session::find_bluetooth_service() {
+    for (auto& [ch, svc] : services_) {
+        if (svc->type() == service::ServiceType::BluetoothService) {
+            return static_cast<service::BluetoothService*>(svc.get());
+        }
+    }
+    return nullptr;
 }
 
 // ===== Send =====

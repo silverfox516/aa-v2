@@ -7,7 +7,9 @@
 #include <com/aauto/engine/IAAEngineCallback.h>
 
 #include <binder/ParcelFileDescriptor.h>
+#include <functional>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace aauto::impl {
@@ -41,6 +43,12 @@ public:
 
     android::binder::Status releaseAudioFocus(int32_t sessionId) override;
     android::binder::Status gainAudioFocus(int32_t sessionId) override;
+
+    android::binder::Status setBluetoothMac(
+        const android::String16& mac) override;
+    android::binder::Status completePairing(int32_t sessionId, int32_t status,
+                                            bool alreadyPaired) override;
+    android::binder::Status completeAuth(int32_t sessionId, int32_t status) override;
 
     android::binder::Status setVideoFocus(
         int32_t sessionId, bool projected) override;
@@ -83,6 +91,20 @@ public:
                               const std::vector<uint8_t>& album_art,
                               const std::string& playlist,
                               uint32_t duration_seconds) override;
+    void on_pairing_request(uint32_t session_id,
+                            const std::string& phone_address,
+                            int32_t method) override;
+    void on_auth_data(uint32_t session_id,
+                      const std::string& auth_data,
+                      int32_t method) override;
+
+    /// Optional sink for setBluetoothMac — main.cpp wires this to the
+    /// AndroidServiceFactory so the next BluetoothService instance
+    /// uses the freshly-pushed MAC.
+    using BluetoothMacSink = std::function<void(const std::string&)>;
+    void set_bluetooth_mac_sink(BluetoothMacSink sink) {
+        bt_mac_sink_ = std::move(sink);
+    }
 
 private:
     engine::IEngineController* engine_;
@@ -90,6 +112,8 @@ private:
 
     std::mutex callback_mutex_;
     android::sp<com::aauto::engine::IAAEngineCallback> callback_;
+
+    BluetoothMacSink bt_mac_sink_;
 };
 
 } // namespace aauto::impl

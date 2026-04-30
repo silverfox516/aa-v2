@@ -39,8 +39,18 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
         Intent serviceIntent = new Intent(this, AaService.class);
         bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE);
 
+        // Listen for VideoFocus only — that's the canonical "phone says
+        // we're not the active display" signal (F.14: VideoFocus is
+        // driven by Surface lifecycle). SESSION_ENDED is intentionally
+        // ignored: a session ending doesn't necessarily mean the
+        // activity should close. Transport switch (USB <-> Wireless,
+        // same phone) ends the old session and immediately auto-
+        // activates a new one — the activity stays put, keeps its
+        // SurfaceView, and re-attaches to the new session through the
+        // normal trySendSurface() path. The activity finishes only
+        // when the phone explicitly hands focus back to native (or the
+        // user navigates away).
         IntentFilter filter = new IntentFilter();
-        filter.addAction(AaService.ACTION_SESSION_ENDED);
         filter.addAction(AaService.ACTION_VIDEO_FOCUS_CHANGED);
         registerReceiver(sessionEndReceiver, filter);
 
@@ -57,14 +67,14 @@ public class AaDisplayActivity extends Activity implements SurfaceHolder.Callbac
     private final BroadcastReceiver sessionEndReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            if (AaService.ACTION_SESSION_ENDED.equals(action)) {
-                Log.i(TAG, "session ended, finishing");
-                finish();
-            } else if (AaService.ACTION_VIDEO_FOCUS_CHANGED.equals(action)) {
+            if (AaService.ACTION_VIDEO_FOCUS_CHANGED.equals(intent.getAction())) {
                 boolean projected = intent.getBooleanExtra(
                         AaService.EXTRA_PROJECTED, true);
                 if (!projected) {
+                    // Phone-initiated NATIVE: just close ourselves.
+                    // AaService is responsible for routing the user back
+                    // to the device list (or wherever) — see F.18, the
+                    // activity stays out of navigation decisions.
                     Log.i(TAG, "video focus lost, finishing");
                     finish();
                 }

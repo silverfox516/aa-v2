@@ -55,7 +55,8 @@ public:
 
     /// Outbound response: status maps to MessageStatus proto enum
     /// (0 = SUCCESS, negative for various failure codes; see
-    /// shared/MessageStatus.proto).
+    /// shared/MessageStatus.proto). Called from Session::complete_pairing
+    /// after Session looks up the BluetoothService instance by type.
     void send_pairing_response(int32_t status, bool already_paired);
     void send_auth_result(int32_t status);
 

@@ -54,7 +54,14 @@ public class AaService extends Service implements SessionLifecycleListener {
     private WirelessSessionCoordinator wirelessCoordinator;
     private EngineConnectionManager engineConnectionManager;
     private UiNavigationController uiNavigationController;
+    private BluetoothPairingCoordinator btPairingCoordinator;
     private final PlaybackController playbackController = new PlaybackController();
+
+    /** True between setSurface(real) and setSurface(null). Used by
+     *  activateSession to decide whether to kick VIDEO_FOCUS_PROJECTED
+     *  immediately (surface already up — transport switch path) or
+     *  wait for AaDisplayActivity.surfaceCreated to trigger it. */
+    private boolean surfaceLive;
 
     /**
      * Latest media playback state for a specific session.
@@ -213,6 +220,14 @@ public class AaService extends Service implements SessionLifecycleListener {
                     + " projected=" + projected);
             handler.post(() -> {
                 sessionManager.onVideoFocusChanged(sessionId, projected);
+                if (!projected && uiNavigationController != null) {
+                    // Phone-initiated NATIVE means "hide AA video, keep
+                    // session BACKGROUND for audio-only". Bring our own
+                    // device list to the front first; otherwise the
+                    // system would fall through to CarLauncher when
+                    // AaDisplayActivity finishes itself on the broadcast.
+                    uiNavigationController.showDeviceList();
+                }
                 Intent intent = new Intent(ACTION_VIDEO_FOCUS_CHANGED);
                 intent.putExtra(EXTRA_PROJECTED, projected);
                 sendBroadcast(intent);
@@ -239,6 +254,24 @@ public class AaService extends Service implements SessionLifecycleListener {
                 getOrCreatePlayback(sessionId).updateMetadata(sessionId, song, artist,
                         album, albumArt, playlist, durationSeconds);
                 notifyDeviceStateChanged();
+            });
+        }
+
+        @Override
+        public void onPairingRequest(int sessionId, String phoneAddress, int method) {
+            handler.post(() -> {
+                if (btPairingCoordinator != null) {
+                    btPairingCoordinator.onPairingRequest(sessionId, phoneAddress, method);
+                }
+            });
+        }
+
+        @Override
+        public void onAuthData(int sessionId, String authData, int method) {
+            handler.post(() -> {
+                if (btPairingCoordinator != null) {
+                    btPairingCoordinator.onAuthData(sessionId, authData, method);
+                }
             });
         }
     };
@@ -268,6 +301,7 @@ public class AaService extends Service implements SessionLifecycleListener {
                     BluetoothAdapter.ERROR);
             if (state == BluetoothAdapter.STATE_ON) {
                 Log.i(TAG, "Bluetooth on");
+                pushBluetoothMacToEngine();
                 startWirelessListeningIfReady();
             } else if (state == BluetoothAdapter.STATE_TURNING_OFF) {
                 Log.i(TAG, "Bluetooth turning off");
@@ -276,6 +310,33 @@ public class AaService extends Service implements SessionLifecycleListener {
             notifyDeviceStateChanged();
         }
     };
+
+    /**
+     * Read the head unit's actual BT MAC from BluetoothAdapter and
+     * push it to the engine. Without this the AAP SDR advertises a
+     * placeholder MAC that doesn't match the device the phone bonded
+     * with — phone retries PAIRING_REQUEST every ~7s.
+     */
+    private void pushBluetoothMacToEngine() {
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter == null) return;
+        String mac = adapter.getAddress();
+        if (mac == null || mac.isEmpty()) {
+            Log.w(TAG, "BluetoothAdapter.getAddress() returned empty");
+            return;
+        }
+        IAAEngine engine = engineProxy;
+        if (engine == null) {
+            Log.w(TAG, "engineProxy null when pushing BT MAC");
+            return;
+        }
+        try {
+            engine.setBluetoothMac(mac);
+            Log.i(TAG, "pushed HU BT MAC to engine: " + mac);
+        } catch (Exception e) {
+            Log.w(TAG, "setBluetoothMac threw", e);
+        }
+    }
 
     // ===== Service lifecycle =====
 
@@ -286,7 +347,12 @@ public class AaService extends Service implements SessionLifecycleListener {
         uiNavigationController = new UiNavigationController(this);
         engineConnectionManager = new EngineConnectionManager(
                 handler, engineCallback,
-                engine -> engineProxy = engine,
+                engine -> {
+                    engineProxy = engine;
+                    // Push BT MAC immediately if the adapter is already on
+                    // (no STATE_ON broadcast on a warm boot).
+                    pushBluetoothMacToEngine();
+                },
                 () -> engineProxy = null,
                 2000, 10);
         engineConnectionManager.connect();
@@ -304,6 +370,11 @@ public class AaService extends Service implements SessionLifecycleListener {
                 new IntentFilter("android.net.wifi.WIFI_AP_STATE_CHANGED"));
         registerReceiver(btStateReceiver,
                 new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED));
+
+        btPairingCoordinator = new BluetoothPairingCoordinator(
+                this, handler, () -> engineProxy);
+        btPairingCoordinator.register();
+
         startWirelessListeningIfReady();
     }
 
@@ -326,6 +397,10 @@ public class AaService extends Service implements SessionLifecycleListener {
         }
         uiNavigationController = null;
         btProfileGate = null;
+        if (btPairingCoordinator != null) {
+            btPairingCoordinator.unregister();
+            btPairingCoordinator = null;
+        }
         try { unregisterReceiver(apStateReceiver); } catch (Exception ignored) {}
         try { unregisterReceiver(btStateReceiver); } catch (Exception ignored) {}
         super.onDestroy();
@@ -435,15 +510,26 @@ public class AaService extends Service implements SessionLifecycleListener {
         }
         try {
             demoteOtherSessions(sessionId);
-            // Prepare session — attach sinks, open display.
-            // VideoFocus(PROJECTED) will be sent when Surface is ready
-            // (driven by AaDisplayActivity's surface lifecycle, F.14).
+            // Prepare session — attach sinks. VideoFocus(PROJECTED) is
+            // sent next, either:
+            //  (a) directly here when AaDisplayActivity is already
+            //      visible with a live Surface — happens on transport
+            //      switches (USB <-> Wireless, same phone) where the
+            //      activity stays put across the session swap; or
+            //  (b) from AaDisplayActivity.surfaceCreated -> onSurfaceReady
+            //      when we still have to launch the activity (cold start).
+            // Either way the trigger funnels through onSurfaceReady() so
+            // there's a single place enforcing the F.14 invariant.
             engineProxy.attachAllSinks(sessionId);
             resumePhoneMedia(sessionId);
             sessionManager.activate(sessionId);
             if (uiNavigationController != null) {
                 uiNavigationController.showDisplayFlow();
             }
+            // Path (a): if a Surface is already live, kick the focus
+            // signal now. Harmless when the activity isn't up yet —
+            // onSurfaceReady is a no-op without an ACTIVE session.
+            onSurfaceReady();
         } catch (RemoteException e) {
             Log.e(TAG, "activateSession failed", e);
         }
@@ -540,6 +626,7 @@ public class AaService extends Service implements SessionLifecycleListener {
      */
     public void onSurfaceReady() {
         if (engineProxy == null) return;
+        if (!surfaceLive) return;
         for (SessionManager.SessionEntry e : sessionManager.getAll()) {
             if (e.state == SessionManager.SessionState.ACTIVE) {
                 Log.i(TAG, "surface ready, sending PROJECTED for session "
@@ -593,6 +680,7 @@ public class AaService extends Service implements SessionLifecycleListener {
 
     public void setSurface(Surface surface) {
         playbackController.setSurface(surface);
+        surfaceLive = (surface != null);
         Log.i(TAG, "setSurface: " + (surface != null ? "decoder ready"
                 : "decoder released"));
     }

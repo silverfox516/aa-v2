@@ -76,6 +76,9 @@ public:
     void send_media_key(uint32_t session_id, int32_t keycode) override;
     void release_audio_focus(uint32_t session_id) override;
     void gain_audio_focus(uint32_t session_id) override;
+    void complete_pairing(uint32_t session_id, int32_t status,
+                          bool already_paired) override;
+    void complete_auth(uint32_t session_id, int32_t status) override;
 
     /// Run event loop. Blocks until shutdown().
     void run(unsigned int thread_count = 1);

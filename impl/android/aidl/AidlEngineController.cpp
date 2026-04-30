@@ -3,6 +3,8 @@
 #include "AidlEngineController.hpp"
 #include "aauto/utils/Logger.hpp"
 
+#include <utils/String8.h>
+
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -146,6 +148,27 @@ android::binder::Status AidlEngineController::releaseAudioFocus(int32_t sessionI
 
 android::binder::Status AidlEngineController::gainAudioFocus(int32_t sessionId) {
     engine_->gain_audio_focus(static_cast<uint32_t>(sessionId));
+    return android::binder::Status::ok();
+}
+
+android::binder::Status AidlEngineController::setBluetoothMac(
+        const android::String16& mac) {
+    std::string mac_utf8 = android::String8(mac).c_str();
+    AA_LOG_I("setBluetoothMac: mac=%s", mac_utf8.c_str());
+    if (bt_mac_sink_) bt_mac_sink_(mac_utf8);
+    return android::binder::Status::ok();
+}
+
+android::binder::Status AidlEngineController::completePairing(
+        int32_t sessionId, int32_t status, bool alreadyPaired) {
+    engine_->complete_pairing(static_cast<uint32_t>(sessionId), status,
+                              alreadyPaired);
+    return android::binder::Status::ok();
+}
+
+android::binder::Status AidlEngineController::completeAuth(
+        int32_t sessionId, int32_t status) {
+    engine_->complete_auth(static_cast<uint32_t>(sessionId), status);
     return android::binder::Status::ok();
 }
 
@@ -302,6 +325,26 @@ void AidlEngineController::on_playback_metadata(
         album_art,
         android::String16(playlist.c_str()),
         static_cast<int32_t>(duration_seconds));
+}
+
+void AidlEngineController::on_pairing_request(
+        uint32_t session_id, const std::string& phone_address, int32_t method) {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (callback_ == nullptr) return;
+    callback_->onPairingRequest(
+        static_cast<int32_t>(session_id),
+        android::String16(phone_address.c_str()),
+        method);
+}
+
+void AidlEngineController::on_auth_data(
+        uint32_t session_id, const std::string& auth_data, int32_t method) {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (callback_ == nullptr) return;
+    callback_->onAuthData(
+        static_cast<int32_t>(session_id),
+        android::String16(auth_data.c_str()),
+        method);
 }
 
 } // namespace aauto::impl

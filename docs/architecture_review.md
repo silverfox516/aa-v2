@@ -785,6 +785,59 @@ Test seam이 디자인의 부산물이 아니라 핵심.
     필요.
   - 자세한 시도 + 시나리오: docs/plans/0006_cluster_display.md.
 
+### F.22 Channel-specific outbound dispatch — IService 통한 broadcast 금지 (2026-04-30)
+
+- **배경**: plan 0009 Day 2에서 BluetoothService outbound API
+  (`send_pairing_response`, `send_auth_result`)를 추가하면서, 기존 패턴 —
+  `IService`에 default-empty virtual 추가 + `Session::complete_*`이 모든
+  service에 broadcast — 그대로 따라갔다. 코드 리뷰 (2026-04-30) 결과 본
+  패턴이 abstraction leakage임을 확인.
+
+- **문제**:
+  - `IService`가 모든 channel의 outbound API union으로 비대화. 현재
+    누적된 default-empty: `send_media_key` (ch5만), `release/gain_audio_focus`
+    (ch0만), `set_video_focus` (video만), `attach/detach_sinks` (sink
+    가진 service만), 그리고 새 `send_pairing_response/send_auth_result`
+    (ch13만).
+  - 신규 channel 추가 시마다 IService 확장 → 모든 18개 service가
+    자동으로 의미 없는 default 보유. fragile.
+  - `Session::complete_pairing` 같은 outbound가 모든 service에 broadcast
+    fire하지만 실제로는 한 service만 처리. 비효율 + 의도 불명확.
+
+- **결정 (2026-04-30)**:
+  - **신규 channel-specific outbound API는 IService에 추가하지 않는다**.
+  - 대신 `Session`이 `ServiceType` 기반으로 instance를 lookup해서
+    static_cast로 specific service에 직접 호출.
+  - 예: `Session::complete_pairing` → `find_bluetooth_service()` →
+    `BluetoothService::send_pairing_response()`.
+  - 기존 IService outbound (`send_media_key`, audio focus, video focus,
+    attach/detach sinks)는 **legacy**로 그대로 유지. 향후 시간 여유
+    되면 같은 패턴으로 점진적 refactor 가능.
+
+- **장점**:
+  - IService 인터페이스가 generic service contract만 유지 (channel
+    open/close/message handling).
+  - Session이 channel별 specific 동작을 알지만 그건 Session의 책임 (우리
+    Hexagonal에서 Session = port-level orchestrator).
+  - dispatch 비용도 낮음 (services_ map size 작음, type() 호출 가벼움).
+
+- **trade-off**:
+  - Session이 BluetoothService 헤더에 의존 — forward declaration으로
+    헤더 의존성 최소화.
+  - dynamic_cast 대신 static_cast + ServiceType 일치 검사 — 타입 안전성
+    런타임 보장은 같음.
+
+- **반례 (적용 안 하는 경우)**:
+  - 같은 outbound가 정말로 여러 service 종류에 의미 있을 때 (예:
+    attach/detach_sinks는 video + audio 둘 다 의미 있음). 이런 경우는
+    legacy broadcast 패턴 그대로.
+
+- **영향**:
+  - 본 결정의 첫 적용: BluetoothService.send_pairing_response /
+    send_auth_result는 IService override 아님, public method.
+  - Session에 `find_bluetooth_service()` private helper.
+  - 새 channel-specific outbound 추가 시 본 결정 참조.
+
 ---
 
 ## Part G. Scoping Decisions (학습 우선순위 적용)

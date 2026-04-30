@@ -19,6 +19,10 @@
 #include <system_error>
 #include <vector>
 
+namespace aauto::service {
+class BluetoothService;
+}
+
 namespace aauto::session {
 
 /// Session -> Engine notification interface.
@@ -78,6 +82,12 @@ public:
     /// Send AudioFocus(GAIN) on the control channel.
     void gain_audio_focus();
 
+    /// Forward bonded result to BluetoothService for PAIRING_RESPONSE.
+    void complete_pairing(int32_t status, bool already_paired);
+
+    /// Forward auth result to BluetoothService for AUTHENTICATION_RESULT.
+    void complete_auth(int32_t status);
+
     /// Update session log tag (e.g., after phone is identified).
     void update_log_tag(const std::string& suffix);
     void set_video_focus(bool projected);
@@ -94,6 +104,10 @@ private:
     void begin_disconnect();
     void close_transport_and_services();
     void complete_disconnect();
+    /// Locate the BluetoothService instance by ServiceType. Forward
+    /// declaration avoids pulling the BluetoothService header into the
+    /// Session interface (services_ is the only place it's needed).
+    service::BluetoothService* find_bluetooth_service();
 
     // Read loop
     void start_read();

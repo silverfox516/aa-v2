@@ -1,11 +1,11 @@
 # 0009 — AAP BluetoothService channel (ch 13)
 
 > Created: 2026-04-29
-> Status: Day 1 PASSED (2026-04-30) — ch13 살아있음 확인.
-> CHANNEL_OPEN_REQ 정상 + PAIRING_REQUEST 즉시 송신 관찰
-> (phone="A8:2B:B9:95:E9:2B" method=PIN). MediaBrowser ch12와 달리
-> 본 채널은 modern AA에서도 active. Day 2 (Bluedroid bridge —
-> auto-pair on request) 진행 가치 확인.
+> Status: **Day 2 DONE (2026-04-30)** — Bluedroid bridge 구현. PAIRING_REQUEST
+> 수신 시 BT 자동 enable + createBond, 결과를 PAIRING_RESPONSE로 응답.
+> 이미 bonded면 short-circuit. dynamic HU MAC push도 함께 — 폰의
+> retry 행동 제거. 추가로 IService API refactor (F.22) — channel-specific
+> outbound는 broadcast 대신 type-aware lookup.
 > Related decisions: G.0 (passive handler rule), G.1 / G.2 (deprecation
 > 패턴 위험 — 본 plan에도 적용 가능), 0008 (PhoneStatus — 본 plan 다음
 > 단계로 reorder됨, 사용자 결정)
@@ -307,3 +307,62 @@ AA.BluetoothService: bluetooth AUTH_RESULT     -> SUCCESS (stub)
 - Day 1 결과가 deprecation이면 plan ON_HOLD하고 plan 0008으로 이동
 - Bluedroid 통합 작업 자체는 Android Automotive 학습 라운드의 큰 챕터로
   분리. 본 학습 프로젝트의 budget 내에서는 의미 있는 진전이 어려움.
+
+---
+
+## Day 2 outcome (2026-04-30)
+
+### Wire 흐름 검증
+
+- USB 연결 → ch13 CHANNEL_OPEN_REQ → PAIRING_REQUEST 수신
+- BluetoothPairingCoordinator가 BT 라디오 자동 enable
+- 폰이 이미 bonded면 short-circuit (`already_paired=true`)
+- 미bonded면 `BluetoothDevice.createBond()` → bond state listener →
+  결과를 `IAAEngine.completePairing(sid, status, alreadyPaired)`으로
+  native에 전달 → BluetoothService가 PAIRING_RESPONSE 송신
+
+### HU MAC dynamic push
+
+- 첫 시도에서 placeholder MAC (`02:00:00:00:00:00`)이 SDR에 advertise됨
+  → 폰이 페어링은 했지만 ~7초마다 PAIRING_REQUEST를 retry (advertised
+  car_address가 실제 HU와 mismatch라 폰 측이 confused)
+- `persist.bluetooth.address` system property는 본 보드에 미존재
+- Fix: AIDL `setBluetoothMac(mac)` 신규. AaService가 BT STATE_ON
+  broadcast 또는 engine connect 시 `BluetoothAdapter.getAddress()` →
+  native push → `AndroidServiceFactory::set_bluetooth_mac()`이
+  `hu_.bluetooth_mac` 갱신. 다음 session start부터 정확한 MAC 사용 →
+  retry 사라짐
+
+### 부수 효과 (HFP)
+
+- `dumpsys bluetooth_manager` 검사 결과 manual pair만 되어 있으면
+  Android system이 알아서 HFP / A2DP_SINK / AVRCP / PbapClient /
+  MapClient 자동 활성화 (Connected 상태 관찰됨)
+- 즉 AAP ch13의 가치 = manual pair 단계 자동화. HFP 통합 자체는
+  별도 작업 불필요 (시스템이 처리)
+
+### 학습 산출
+
+- ch13은 modern AA에서도 살아있는 legacy 채널 (ch12 MediaBrowser와 대조)
+- AAP 페어링은 *시그널링*만, 음성은 BT HFP 별도 — 책임 분리 확인
+- IService API 패턴 한계 노출 (F.22) — channel-specific outbound는
+  broadcast 부적절, type-aware lookup으로 정공법 refactor
+
+### 변경된 파일
+
+- `aidl/com/aauto/engine/IAAEngine.aidl` — completePairing/completeAuth
+  + setBluetoothMac
+- `aidl/com/aauto/engine/IAAEngineCallback.aidl` — onPairingRequest /
+  onAuthData
+- Native chain: `IEngineController`, `Engine`, `Session`,
+  `AidlEngineController`, `BluetoothService`
+- `Session::find_bluetooth_service()` (F.22 적용)
+- Java: `BluetoothPairingCoordinator` 신규, `AaService`에서 wiring +
+  BT MAC push
+- `AndroidManifest.xml` versionName 0.2.9 → 0.3.0
+
+### 향후
+
+- Day 3 (UI 통합 — 페어링 confirmation dialog) 보류. 현재 자동
+  페어링이 user 부담 없이 동작하므로 우선순위 낮음.
+- 인증된 OEM 환경 + 사용자 confirmation 필요 시 Day 3 재오픈.

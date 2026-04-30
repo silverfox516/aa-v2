@@ -137,18 +137,26 @@ public:
         const std::string& song, const std::string& artist,
         const std::string& album, const std::vector<uint8_t>& album_art,
         const std::string& playlist, uint32_t duration_seconds)>;
+    using PairingRequestCb = std::function<void(uint32_t session_id,
+        const std::string& phone_address, int32_t method)>;
+    using AuthDataCb = std::function<void(uint32_t session_id,
+        const std::string& auth_data, int32_t method)>;
 
     AndroidServiceFactory(const engine::HeadunitConfig& config,
                           VideoDataCb video_cb, AudioDataCb audio_cb,
                           VideoFocusCb focus_cb,
                           PlaybackStatusCb playback_status_cb,
-                          PlaybackMetadataCb playback_metadata_cb)
+                          PlaybackMetadataCb playback_metadata_cb,
+                          PairingRequestCb pairing_cb,
+                          AuthDataCb auth_cb)
         : hu_(config)
         , video_cb_(std::move(video_cb))
         , audio_cb_(std::move(audio_cb))
         , focus_cb_(std::move(focus_cb))
         , playback_status_cb_(std::move(playback_status_cb))
-        , playback_metadata_cb_(std::move(playback_metadata_cb)) {}
+        , playback_metadata_cb_(std::move(playback_metadata_cb))
+        , pairing_cb_(std::move(pairing_cb))
+        , auth_cb_(std::move(auth_cb)) {}
 
     std::map<int32_t, std::shared_ptr<service::IService>>
     create_services(service::SendMessageFn send_fn) override {
@@ -260,15 +268,31 @@ public:
         // deprecated like ch12, see G.1).
         services[9] = std::make_shared<service::PhoneStatusService>(send_fn);
 
-        // Channel 13: Bluetooth — Day 1 of plan 0009. Passive
-        // observation: parse PAIRING_REQUEST and AUTH_DATA but do
-        // NOT auto-respond. Auto-responding SUCCESS without actually
-        // pairing via Bluedroid would mislead the phone (it would
-        // assume HFP is available when it isn't). The send_*
-        // outbound APIs exist on the service for Day 2/3 once a
-        // Bluedroid bridge is in place.
-        services[13] = std::make_shared<service::BluetoothService>(
-            send_fn, hu_.bluetooth_mac);
+        // Channel 13: Bluetooth — Day 2 of plan 0009. Inbound
+        // PAIRING_REQUEST and AUTH_DATA are forwarded through AIDL
+        // to the Java AaService, which drives Bluedroid (enable BT,
+        // createBond) and reports the result back via
+        // IAAEngine.completePairing / completeAuth.
+        {
+            auto bt_svc = std::make_shared<service::BluetoothService>(
+                send_fn, hu_.bluetooth_mac);
+            uint32_t sid = current_session_id_;
+            bt_svc->set_pairing_request_callback(
+                [this, sid](const std::string& addr,
+                       service::BluetoothService::PairingMethod m) {
+                    if (pairing_cb_) {
+                        pairing_cb_(sid, addr, static_cast<int32_t>(m));
+                    }
+                });
+            bt_svc->set_auth_data_callback(
+                [this, sid](const std::string& data,
+                       service::BluetoothService::PairingMethod m) {
+                    if (auth_cb_) {
+                        auth_cb_(sid, data, static_cast<int32_t>(m));
+                    }
+                });
+            services[13] = bt_svc;
+        }
 
         // Channels 8 / 11 / 12 / 14 (Nav / Notification / MediaBrowser /
         // VendorExtension) remain unregistered. Their service classes
@@ -292,6 +316,15 @@ public:
 
     void set_session_id(uint32_t id) override { current_session_id_ = id; }
 
+    /// Allow the AIDL layer to push the head unit's actual BT MAC after
+    /// reading it from BluetoothAdapter. Sessions started after this
+    /// call use the new value in their SDR's BluetoothService.car_address.
+    void set_bluetooth_mac(const std::string& mac) {
+        AA_LOG_I("AndroidServiceFactory: bluetooth_mac %s -> %s",
+                 hu_.bluetooth_mac.c_str(), mac.c_str());
+        hu_.bluetooth_mac = mac;
+    }
+
 private:
     engine::HeadunitConfig hu_;
     VideoDataCb video_cb_;
@@ -299,6 +332,8 @@ private:
     VideoFocusCb focus_cb_;
     PlaybackStatusCb playback_status_cb_;
     PlaybackMetadataCb playback_metadata_cb_;
+    PairingRequestCb pairing_cb_;
+    AuthDataCb auth_cb_;
     uint32_t current_session_id_ = 0;
 };
 
@@ -329,6 +364,11 @@ int main(int /*argc*/, char* /*argv*/[]) {
     hu_config.video_height = 720;
     hu_config.video_fps = 30;
     hu_config.video_density = 160;
+
+    // bluetooth_mac stays at the placeholder until the Java side calls
+    // IAAEngine.setBluetoothMac with the value read from
+    // BluetoothAdapter.getAddress() — system property approach
+    // (persist.bluetooth.address) is unreliable on this board.
 
     // AIDL controller (created first so we can wire callbacks)
     // Will be registered as binder service below.
@@ -369,6 +409,14 @@ int main(int /*argc*/, char* /*argv*/[]) {
                 aidl_raw->on_playback_metadata(
                     sid, song, artist, album, album_art, playlist, duration);
             }
+        },
+        // Pairing request callback (channel 13 PAIRING_REQUEST)
+        [&aidl_raw](uint32_t sid, const std::string& phone_addr, int32_t method) {
+            if (aidl_raw) aidl_raw->on_pairing_request(sid, phone_addr, method);
+        },
+        // Auth data callback (channel 13 AUTHENTICATION_DATA)
+        [&aidl_raw](uint32_t sid, const std::string& auth_data, int32_t method) {
+            if (aidl_raw) aidl_raw->on_auth_data(sid, auth_data, method);
         }
     );
 
@@ -382,6 +430,13 @@ int main(int /*argc*/, char* /*argv*/[]) {
     android::sp<impl::AidlEngineController> aidl_controller =
         new impl::AidlEngineController(&engine, hu_config);
     aidl_raw = aidl_controller.get();
+    aidl_controller->set_bluetooth_mac_sink(
+        [factory_weak = std::weak_ptr<AndroidServiceFactory>(service_factory)]
+        (const std::string& mac) {
+            if (auto f = factory_weak.lock()) {
+                f->set_bluetooth_mac(mac);
+            }
+        });
 
     android::status_t status = android::defaultServiceManager()->addService(
         android::String16("aa-engine"), aidl_controller);

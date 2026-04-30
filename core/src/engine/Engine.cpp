@@ -143,6 +143,28 @@ void Engine::gain_audio_focus(uint32_t session_id) {
     });
 }
 
+void Engine::complete_pairing(uint32_t session_id, int32_t status,
+                              bool already_paired) {
+    AA_LOG_I("complete_pairing: session=%u status=%d already_paired=%d",
+             session_id, status, already_paired ? 1 : 0);
+    asio::post(io_context_, [this, session_id, status, already_paired] {
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            it->second->complete_pairing(status, already_paired);
+        }
+    });
+}
+
+void Engine::complete_auth(uint32_t session_id, int32_t status) {
+    AA_LOG_I("complete_auth: session=%u status=%d", session_id, status);
+    asio::post(io_context_, [this, session_id, status] {
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            it->second->complete_auth(status);
+        }
+    });
+}
+
 void Engine::set_video_focus(uint32_t session_id, bool projected) {
     AA_LOG_I("set_video_focus: session=%u projected=%d", session_id, projected);
     asio::post(io_context_, [this, session_id, projected] {

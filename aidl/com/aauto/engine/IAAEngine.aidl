@@ -49,4 +49,28 @@ interface IAAEngine {
      * (otherwise it stays paused from the prior LOSS).
      */
     oneway void gainAudioFocus(int sessionId);
+
+    /**
+     * Inform the engine of the head unit's actual Bluetooth MAC.
+     * AaService reads it from BluetoothAdapter.getAddress() once the
+     * adapter is on, then pushes it here. The engine uses this in
+     * the SDR's BluetoothService.car_address field for any sessions
+     * started after this call. Sessions already in flight keep the
+     * value from when their SDR was sent.
+     */
+    oneway void setBluetoothMac(String mac);
+
+    /**
+     * Finish a pairing negotiation started by IAAEngineCallback.onPairingRequest.
+     * @param status MessageStatus proto value (0 = SUCCESS, negative = failure).
+     * @param alreadyPaired true if the phone was already bonded before
+     *        the request (skip Bluedroid createBond).
+     */
+    oneway void completePairing(int sessionId, int status, boolean alreadyPaired);
+
+    /**
+     * Finish an authentication step after IAAEngineCallback.onAuthData.
+     * status follows the same MessageStatus convention as completePairing.
+     */
+    oneway void completeAuth(int sessionId, int status);
 }

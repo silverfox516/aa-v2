@@ -69,6 +69,19 @@ public:
                                       const std::vector<uint8_t>& /*album_art*/,
                                       const std::string& /*playlist*/,
                                       uint32_t /*duration_seconds*/) {}
+
+    /// Bluetooth pairing request from phone (channel 13). The platform
+    /// layer should drive Bluedroid (createBond etc.) and call back with
+    /// IEngineController::complete_pairing once the bond settles.
+    /// method matches BluetoothPairingMethod proto.
+    virtual void on_pairing_request(uint32_t /*session_id*/,
+                                    const std::string& /*phone_address*/,
+                                    int32_t /*method*/) {}
+
+    /// Authentication data accompanying an in-progress pairing.
+    virtual void on_auth_data(uint32_t /*session_id*/,
+                              const std::string& /*auth_data*/,
+                              int32_t /*method*/) {}
 };
 
 /// Driving port: app -> engine commands.
@@ -121,6 +134,16 @@ public:
     /// Send AudioFocus(GAIN). Used after release_audio_focus to allow
     /// the phone's media app to resume playback.
     virtual void gain_audio_focus(uint32_t session_id) = 0;
+
+    /// Complete a pairing negotiation initiated by IEngineCallback::on_pairing_request.
+    /// status follows MessageStatus proto (0 = SUCCESS, negative = failure).
+    virtual void complete_pairing(uint32_t session_id,
+                                  int32_t status,
+                                  bool already_paired) = 0;
+
+    /// Complete an authentication step (after on_auth_data). Same status
+    /// convention as complete_pairing.
+    virtual void complete_auth(uint32_t session_id, int32_t status) = 0;
 };
 
 } // namespace aauto::engine
