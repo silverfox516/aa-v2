@@ -28,12 +28,12 @@ public class VideoDecoder {
     private Surface surface;
     private boolean configured;
 
-    public void setSurface(Surface surface) {
+    public synchronized void setSurface(Surface surface) {
         this.surface = surface;
         Log.i(TAG, "surface set");
     }
 
-    public void setVideoSize(int width, int height) {
+    public synchronized void setVideoSize(int width, int height) {
         this.videoWidth = width;
         this.videoHeight = height;
     }
@@ -41,15 +41,23 @@ public class VideoDecoder {
     /**
      * Open the decoder with the given dimensions.
      * CSD (SPS/PPS) is not set here — it arrives in the stream via feedData.
+     * Synchronized against feedData()/release() to keep `codec` and
+     * `configured` mutations atomic — open is called from a Binder
+     * thread while release runs on main.
      */
-    public boolean open() {
+    public synchronized boolean open() {
         if (configured) return true;
-        if (surface == null) {
-            Log.e(TAG, "no surface set");
+        if (surface == null || !surface.isValid()) {
+            Log.w(TAG, "open(): no valid surface — skipping");
             return false;
         }
+        MediaCodec localCodec = null;
         try {
-            codec = MediaCodec.createDecoderByType(MIME_H264);
+            localCodec = MediaCodec.createDecoderByType(MIME_H264);
+            if (localCodec == null) {
+                Log.e(TAG, "createDecoderByType returned null");
+                return false;
+            }
             MediaFormat format = MediaFormat.createVideoFormat(
                     MIME_H264, videoWidth, videoHeight);
             format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
@@ -58,14 +66,21 @@ public class VideoDecoder {
             // decoder to skip frame reordering and present ASAP. Harmless
             // on Android 10 — unknown keys are ignored.
             format.setInteger("low-latency", 1);
-            codec.configure(format, surface, null, 0);
-            codec.start();
+            localCodec.configure(format, surface, null, 0);
+            localCodec.start();
+            // Only commit to the field after start() succeeds — feedData
+            // checks `codec != null` and assumes it's started.
+            codec = localCodec;
             configured = true;
             Log.i(TAG, "decoder opened: " + videoWidth + "x" + videoHeight);
             return true;
         } catch (Exception e) {
             Log.e(TAG, "failed to open decoder", e);
+            if (localCodec != null) {
+                try { localCodec.release(); } catch (Exception ignored) {}
+            }
             codec = null;
+            configured = false;
             return false;
         }
     }
@@ -74,7 +89,7 @@ public class VideoDecoder {
      * Feed compressed H.264 data (including SPS/PPS and frame data).
      * Queues input and immediately drains any available output to Surface.
      */
-    public void feedData(byte[] data) {
+    public synchronized void feedData(byte[] data) {
         if (!configured || codec == null || data == null) return;
 
         try {
@@ -107,7 +122,7 @@ public class VideoDecoder {
         }
     }
 
-    public void release() {
+    public synchronized void release() {
         configured = false;
         if (codec != null) {
             try {
