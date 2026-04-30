@@ -259,7 +259,12 @@ public class UsbMonitor {
                 " ep_in=0x" + Integer.toHexString(epIn) +
                 " ep_out=0x" + Integer.toHexString(epOut));
 
-        activeConnection = conn;  // Keep alive to maintain fd validity
+        // The fd is about to transfer to ParcelFileDescriptor.adoptFd
+        // in UsbSessionCoordinator. Once it does, UsbDeviceConnection
+        // must no longer call close() on the underlying fd — that would
+        // double-close it and Android's fdsan aborts the process. Drop
+        // our reference so closeConnection() does nothing.
+        activeConnection = null;
         listener.onDeviceReady(fd, epIn, epOut);
     }
 
@@ -275,9 +280,12 @@ public class UsbMonitor {
     }
 
     private void closeConnection() {
-        if (activeConnection != null) {
-            activeConnection.close();
-            activeConnection = null;
-        }
+        // Only the AOA-switch path keeps a UsbDeviceConnection alive
+        // (and that one is closed in the finally block of
+        // performAoaSwitch). The post-AOA "active" connection has its
+        // fd ownership transferred to ParcelFileDescriptor, so we must
+        // not call close() on it — fdsan would abort the process for
+        // closing a fd it doesn't own anymore.
+        activeConnection = null;
     }
 }

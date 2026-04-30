@@ -597,3 +597,43 @@ occurs once at boot (inaudible / masked by ignition) and never on
 subsequent connects. Not pursued here — the value/effort ratio is
 poor for a learning project, and AaService is `android:persistent`
 anyway. Documented as an option for whoever inherits this code.
+
+---
+
+## 25. fdsan abort on USB detach — double-close of AOA file descriptor
+
+**Symptom**: After a working AAP session, unplugging USB makes the
+AaService process die immediately. logcat shows:
+
+```
+fdsan: attempted to close file descriptor N, expected to be unowned,
+       actually owned by ParcelFileDescriptor 0x...
+backtrace: UsbMonitor.closeConnection -> UsbDeviceConnection.close
+```
+
+The Application restarts (AaApplication onCreate fires again) and the
+wireless session — if any — is rebuilt from scratch.
+
+**Root cause**: `UsbMonitor.openAoaDevice` creates a
+`UsbDeviceConnection`, calls `getFileDescriptor()`, and hands the
+fd to `UsbSessionCoordinator` which wraps it with
+`ParcelFileDescriptor.adoptFd(fd)` and ships it across AIDL to the
+native engine. `adoptFd` transfers ownership to the
+ParcelFileDescriptor — but the original `UsbDeviceConnection` still
+believes it owns the same fd. When ACTION_USB_DEVICE_DETACHED fires
+later, our receiver calls `UsbDeviceConnection.close()`, which calls
+`close(fd)` on a fd that fdsan has already tagged as owned by the
+ParcelFileDescriptor. Bionic's fdsan responds with SIGABRT.
+
+**Fix (2026-04-30)**: In `UsbMonitor.openAoaDevice`, drop the local
+reference to the connection (`activeConnection = null`) right after
+fd transfer, and turn `closeConnection()` into a no-op for the
+post-AOA case. The ParcelFileDescriptor in the engine's hands is the
+sole owner — when the engine releases it (or the binder transaction
+ends), the fd is closed exactly once.
+
+**Lesson**: Anywhere a Java owner hands a raw fd to native via
+`ParcelFileDescriptor.adoptFd` or `dup`, the original Java owner
+must drop its handle without calling `close()` on it. fdsan turns
+this kind of ownership confusion from a silent bug into a process
+abort, which is great for finding the bug but ruthless about it.
